@@ -2,6 +2,7 @@ import { getInstallationOctokit } from "./github.js";
 import { queue, type PullRequestJob } from "./queue.js";
 import { gatherPrContext } from "./context.js";
 import { generateTestPlan } from "./testplan.js";
+import { upsertPlanComment } from "./comment.js";
 
 async function processJob(job: PullRequestJob): Promise<void> {
   const label = `${job.owner}/${job.repo}#${job.prNumber}`;
@@ -21,17 +22,10 @@ async function processJob(job: PullRequestJob): Promise<void> {
     return;
   }
 
-  // Phase 2 will post this as a PR comment; for now the log is the output.
-  console.log(`test plan for ${label} (confidence: ${plan.confidence}):`);
-  console.log(`  summary: ${plan.summary}`);
-  if (plan.items.length === 0) {
-    console.log("  no browser-testable items");
-  }
-  for (const [i, item] of plan.items.entries()) {
-    console.log(`  ${i + 1}. ${item.intent} [${item.route}]`);
-    for (const step of item.steps) console.log(`       - ${step}`);
-    console.log(`       expect: ${item.expected}`);
-  }
+  console.log(
+    `test plan for ${label} (confidence: ${plan.confidence}, ${plan.items.length} items): ${plan.summary}`,
+  );
+  await upsertPlanComment(octokit, job, plan);
 }
 
 /**

@@ -16,9 +16,9 @@
     ]
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.12",
     "@octokit/app": "^16.1.2",
     "@octokit/webhooks": "^14.2.0",
-    "@openrouter/ai-sdk-provider": "^3.0.0",
     "ai": "^7.0.29",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

@@ -1,6 +1,8 @@
 # Greenlight
 
-AI PR test bot. A GitHub App that fires on every pull request, infers intent from the change, drives the Vercel preview to test it, and posts pass/fail results. **Phase 0** (this scaffold): receive a signed `pull_request` webhook → queue → worker posts a hello comment on the PR.
+AI PR test bot. A GitHub App that fires on every pull request, infers intent from the change, drives the Vercel preview to test it, and posts pass/fail results.
+
+**Where we are:** on every PR open/push, the worker gathers the PR's context (diff, commits, linked issue, changed files), asks an LLM (Kimi K2.6 on Fireworks, schema-enforced) for a structured test plan, and posts it as a PR comment. The comment is the source of truth for corrections: unchecking a box skips that test, editing the text corrects the plan (human edits are never overwritten), a 👎 reaction requests a fresh plan on the next push, and deleting the comment resets everything. Execution against the Vercel preview is next (Phases 3–5).
 
 ## Architecture
 
