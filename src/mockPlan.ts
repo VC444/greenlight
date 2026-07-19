@@ -10,11 +10,13 @@ import type { TestPlan } from "./testplan.js";
 // Captured from a real Fireworks run so the pipeline is exercised against
 // representative model output. Swap these items whenever the preview changes.
 export const MOCK_PLAN: TestPlan = {
-  summary: "Adds a 'say hi bro' navigation button to the landing page header that alerts 'hey there' when clicked.",
+  summary:
+    "Adds a 'Say hi bro' navigation button to the landing page header whose label changes to 'I said hi bro' when clicked.",
   confidence: "high",
   items: [
     {
-      intent: "Verify the landing page header shows a new 'say hi bro' navigation button.",
+      intent:
+        "Verify the landing page header shows a new 'Say hi bro' navigation button.",
       route: "/",
       steps: [
         "Set the browser viewport to at least 768px wide so the desktop navigation is visible.",
@@ -23,18 +25,20 @@ export const MOCK_PLAN: TestPlan = {
         "Look at the top navigation bar to the right of the 'Pricing' link.",
       ],
       expected:
-        "A button with the text 'say hi bro' is visible in the header between 'Pricing' and 'Get Started'.",
+        "A button with the text 'Say hi bro' is visible in the header between 'Pricing' and 'Get Started'.",
     },
     {
-      intent: "Verify clicking the new button triggers an alert with the message 'hey there'.",
+      intent:
+        "Verify clicking the button changes its label to 'I said hi bro'.",
       route: "/",
       steps: [
         "Set the browser viewport to at least 768px wide so the desktop navigation is visible.",
         "Navigate to the root route '/'.",
         "Wait for the landing page to fully load.",
-        "Click the 'say hi bro' button in the header.",
+        "Click the 'Say hi bro' button in the header.",
       ],
-      expected: "A browser JavaScript alert dialog appears with the message text 'hey there'.",
+      expected:
+        "The button's text now reads 'I said hi bro' instead of 'say hi bro'.",
     },
   ],
 };
