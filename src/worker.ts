@@ -4,6 +4,7 @@ import { gatherPrContext } from "./context.js";
 import { generateTestPlan, type TestPlan } from "./testplan.js";
 import { upsertPlanComment } from "./comment.js";
 import { waitForPreview } from "./preview.js";
+import { runPlan } from "./execute.js";
 import { config } from "./config.js";
 import { MOCK_PLAN } from "./mockPlan.js";
 
@@ -45,9 +46,21 @@ async function processJob(job: PullRequestJob): Promise<void> {
   // also the window in which a human can correct the plan before we execute it.
   const preview = await waitForPreview(octokit, job);
   switch (preview.status) {
-    case "ready":
-      console.log(`preview ready for ${label}: ${preview.url} — ready to execute (Phase 4)`);
+    case "ready": {
+      console.log(`preview ready for ${label}: ${preview.url} — executing plan`);
+      const result = await runPlan(preview.url, plan);
+      if (result) {
+        const pass = result.items.filter((i) => i.verdict === "pass").length;
+        const fail = result.items.filter((i) => i.verdict === "fail").length;
+        const uncertain = result.items.filter((i) => i.verdict === "uncertain").length;
+        console.log(
+          `executed ${result.items.length} item(s) for ${label}: ` +
+            `${pass} pass, ${fail} fail, ${uncertain} uncertain` +
+            ` — replay ${result.replayUrl ?? "n/a"}`,
+        );
+      }
       break;
+    }
     case "failed":
       console.warn(`preview unavailable for ${label}: ${preview.reason} — staying silent`);
       break;

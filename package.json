@@ -17,11 +17,13 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.12",
+    "@browserbasehq/stagehand": "^3.7.0",
     "@octokit/app": "^16.1.2",
     "@octokit/webhooks": "^14.2.0",
     "ai": "^7.0.29",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "playwright-core": "^1.61.1",
     "smee-client": "^5.0.0",
     "zod": "^4.4.3"
   },

@@ -44,4 +44,12 @@ export const config = {
   // from src/mockPlan.ts instead, so preview access + browser automation can be
   // validated deterministically without spending credits. Off = real model.
   useMockPlan: process.env.GREENLIGHT_MOCK_PLAN === "1",
+  // Browserbase (Phase 4 execution). Both empty = execution skipped (stay
+  // silent, never red). Free tier allows ~3 concurrent sessions.
+  browserbaseApiKey: process.env.BROWSERBASE_API_KEY ?? "",
+  browserbaseProjectId: process.env.BROWSERBASE_PROJECT_ID ?? "",
+  maxConcurrentSessions: Number(process.env.MAX_CONCURRENT_SESSIONS ?? 3),
+  // Hard cap on a single browser session's lifetime so a hung run can't burn
+  // the whole free-tier budget.
+  sessionTimeoutMs: Number(process.env.SESSION_TIMEOUT_MS ?? 900_000),
 };
