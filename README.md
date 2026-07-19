@@ -30,6 +30,7 @@ GitHub → **Settings → Developer settings → GitHub Apps → New GitHub App*
   |---|---|---|
   | Contents | Read-only | fetch diff/files (Phase 1) |
   | Pull requests | Read & write | receive PR events + post comments |
+  | Deployments | Read-only | resolve the Vercel preview URL (Phase 3) |
   | Checks | Read & write | check runs (Phase 5) |
   | Issues | Read-only | linked issues (Phase 1) |
 - **Subscribe to events:** Pull request (only)
