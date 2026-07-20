@@ -11,18 +11,23 @@ const DESKTOP_VIEWPORT = { width: 1280, height: 800 };
 const NAV_TIMEOUT_MS = 30_000;
 
 // Stagehand's act/extract reasoning runs on OUR Fireworks model, not the
-// Browserbase Model Gateway (disableAPI keeps it all local). The provider
-// PREFIX matters: Stagehand's "openai/…" maps to @ai-sdk/openai, whose default
-// model hits OpenAI's *Responses* API (/responses) — which Fireworks doesn't
-// implement, so every call fails with "Invalid JSON response". "togetherai/…"
-// maps to @ai-sdk/togetherai, an OpenAI-*compatible* provider that hits
-// /chat/completions and honors a custom baseURL — exactly what Fireworks serves.
+// Browserbase Model Gateway (disableAPI keeps it all local). We let Stagehand
+// build the provider itself from a "prefix/model" string (its own AI SDK stack)
+// rather than injecting a model — injecting one crosses a version boundary
+// (this app is on ai@7, Stagehand bundles ai@5) and breaks at runtime.
+//
+// The provider PREFIX matters: "openai/…" maps to @ai-sdk/openai, whose default
+// hits OpenAI's *Responses* API — which Fireworks doesn't implement. "togetherai/…"
+// maps to an OpenAI-*compatible* provider that hits /chat/completions and honors
+// a custom baseURL — exactly what Fireworks serves.
 const FIREWORKS_PROVIDER_PREFIX = "togetherai";
 const FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1";
 const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY ?? "";
+// Must stay a kimi-family model: Stagehand only grammar-enforces its act/extract
+// schemas for kimi/deepseek/glm (others free-guess the shape and fail Zod). Kept
+// separate from the plan model (GREENLIGHT_MODEL) so that setting can't leak here.
 const EXECUTOR_MODEL =
   process.env.GREENLIGHT_EXECUTOR_MODEL ??
-  process.env.GREENLIGHT_MODEL ??
   "accounts/fireworks/models/kimi-k2p7-code";
 
 // A native alert/confirm/prompt over CDP FREEZES the page (Stagehand has no
@@ -87,24 +92,25 @@ function releaseSlot(): void {
   slotWaiters.shift()?.();
 }
 
-/** True when everything execution needs is configured: a remote browser
- *  (Browserbase) and the LLM that drives + judges the steps (Fireworks). */
+/** True when everything execution needs is configured: the LLM that drives +
+ *  judges the steps (Fireworks), plus a browser. Local mode needs no Browserbase
+ *  credentials; remote mode needs both the API key and project id. */
 export function canExecute(): boolean {
-  return Boolean(
-    config.browserbaseApiKey &&
-    config.browserbaseProjectId &&
-    FIREWORKS_API_KEY,
-  );
+  if (!FIREWORKS_API_KEY) return false;
+  if (config.localBrowser) return true;
+  return Boolean(config.browserbaseApiKey && config.browserbaseProjectId);
 }
 
 /**
- * Drives the PR's preview through the plan in a remote Browserbase browser,
- * driven by Stagehand acting on natural-language steps and an LLM judge for each
- * item's `expected`. Returns per-item verdicts + evidence and the session replay
- * URL, or null when execution can't run at all (callers stay silent).
+ * Drives the PR's preview through the plan in a browser (a Browserbase cloud
+ * session, or a local Chrome when config.localBrowser is set), acting on
+ * natural-language steps with an LLM judge for each item's `expected`. Returns
+ * per-item verdicts + evidence and the session replay URL, or null when
+ * execution can't run at all (callers stay silent).
  *
- * Sessions are opened late (only once we have a ready preview) and
- * lifetime-capped by browserbaseSessionCreateParams.timeout.
+ * Cloud sessions are opened late (only once we have a ready preview) and
+ * lifetime-capped by browserbaseSessionCreateParams.timeout. Local runs have no
+ * session id and therefore no replay URL.
  */
 export async function runPlan(
   previewUrl: string,
@@ -112,31 +118,44 @@ export async function runPlan(
 ): Promise<ExecutionResult | null> {
   if (!canExecute()) {
     console.warn(
-      "execution not configured (needs BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, FIREWORKS_API_KEY) — skipping",
+      "execution not configured (needs FIREWORKS_API_KEY plus either " +
+        "GREENLIGHT_LOCAL_BROWSER=1 or BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID) — skipping",
     );
     return null;
   }
 
   await acquireSlot();
-  const stagehand = new Stagehand({
-    env: "BROWSERBASE",
-    apiKey: config.browserbaseApiKey,
-    projectId: config.browserbaseProjectId,
-    // Reason locally on our Fireworks model — never route act/extract through
-    // Browserbase's server-side API / Model Gateway.
+  // Reason locally on our Fireworks model (disableAPI) — never route act/extract
+  // through Browserbase's server-side API / Model Gateway. Browser location is
+  // the only thing that differs between local and remote.
+  const modelConfig = {
     disableAPI: true,
-    verbose: 0,
+    verbose: 0 as const,
     disablePino: true,
     model: {
       modelName: `${FIREWORKS_PROVIDER_PREFIX}/${EXECUTOR_MODEL}`,
       apiKey: FIREWORKS_API_KEY,
       baseURL: FIREWORKS_BASE_URL,
     },
-    browserbaseSessionCreateParams: {
-      projectId: config.browserbaseProjectId,
-      timeout: Math.floor(config.sessionTimeoutMs / 1000), // seconds
-    },
-  });
+  };
+  const stagehand = config.localBrowser
+    ? new Stagehand({
+        ...modelConfig,
+        env: "LOCAL",
+        localBrowserLaunchOptions: {
+          viewport: DESKTOP_VIEWPORT,
+        },
+      })
+    : new Stagehand({
+        ...modelConfig,
+        env: "BROWSERBASE",
+        apiKey: config.browserbaseApiKey,
+        projectId: config.browserbaseProjectId,
+        browserbaseSessionCreateParams: {
+          projectId: config.browserbaseProjectId,
+          timeout: Math.floor(config.sessionTimeoutMs / 1000), // seconds
+        },
+      });
 
   try {
     await stagehand.init();
@@ -145,7 +164,9 @@ export async function runPlan(
       ? `https://www.browserbase.com/sessions/${sessionId}`
       : undefined;
     console.log(
-      `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"}`,
+      config.localBrowser
+        ? `local browser session (model ${EXECUTOR_MODEL})`
+        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"}`,
     );
 
     const page =

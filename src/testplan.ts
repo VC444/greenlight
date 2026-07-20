@@ -56,6 +56,7 @@ Rules:
 - Only propose tests a browser can execute against a deployed preview: navigate, click, type, submit, and observe rendered output. No unit tests, no direct API assertions, no access to the codebase at runtime.
 - Routes come from the Next.js file layout (app/ or pages/ directories) visible in the changed file paths and contents.
 - Steps must be concrete and self-contained: "Type 'test@example.com' into the email field", not "test the form". Assume the tester has never seen this app.
+- Never emit steps that resize the window or set the browser viewport/screen size — the runner already opens a desktop-width (1280px) viewport, so the desktop navigation is always visible. Write steps as if that has already happened.
 - Prefer 1-3 high-confidence items over many speculative ones. A wrong FAIL is far worse than a missed test.
 - If the PR body/title are empty or uninformative, infer intent from the diff alone and set confidence to "low".
 - If the change has no user-visible browser-testable surface (pure refactor, CI config, docs, dependency bumps), return an empty items array and say why in the summary.`;

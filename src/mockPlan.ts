@@ -19,7 +19,6 @@ export const MOCK_PLAN: TestPlan = {
         "Verify the landing page header shows a new 'Say hi bro' navigation button.",
       route: "/",
       steps: [
-        "Set the browser viewport to at least 768px wide so the desktop navigation is visible.",
         "Navigate to the root route '/'.",
         "Wait for the landing page to fully load.",
         "Look at the top navigation bar to the right of the 'Pricing' link.",
@@ -32,7 +31,6 @@ export const MOCK_PLAN: TestPlan = {
         "Verify clicking the button changes its label to 'I said hi bro'.",
       route: "/",
       steps: [
-        "Set the browser viewport to at least 768px wide so the desktop navigation is visible.",
         "Navigate to the root route '/'.",
         "Wait for the landing page to fully load.",
         "Click the 'Say hi bro' button in the header.",

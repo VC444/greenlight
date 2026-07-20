@@ -44,6 +44,12 @@ export const config = {
   // from src/mockPlan.ts instead, so preview access + browser automation can be
   // validated deterministically without spending credits. Off = real model.
   useMockPlan: process.env.GREENLIGHT_MOCK_PLAN === "1",
+  // Testing switch: run the browser locally (Stagehand env "LOCAL", a Chrome on
+  // this machine) instead of opening a Browserbase cloud session. No Browserbase
+  // credits are spent and no API key/project id is required — only Fireworks
+  // (which still drives act/extract). Ideal for iterating for free; prod stays
+  // on Browserbase (unset). LLM inference is identical in both modes.
+  localBrowser: process.env.GREENLIGHT_LOCAL_BROWSER === "1",
   // Browserbase (Phase 4 execution). Both empty = execution skipped (stay
   // silent, never red). Free tier allows ~3 concurrent sessions.
   browserbaseApiKey: process.env.BROWSERBASE_API_KEY ?? "",
