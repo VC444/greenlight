@@ -26,11 +26,17 @@ const TestPlanItemSchema = z.object({
     .describe("What user-visible behavior this verifies, in plain English"),
   route: z
     .string()
-    .describe('Path on the preview deployment to visit, e.g. "/checkout"'),
+    .describe(
+      'The single entry-point path where this journey begins, e.g. "/checkout". ' +
+        "The runner navigates here once before the first step; never add steps that re-open it.",
+    ),
   steps: z
     .array(z.string())
     .describe(
-      "Concrete browser actions, one per step, executable by Playwright",
+      "Concrete browser actions for ONE continuous journey, run in order in the " +
+        "same tab with no page reload between them (state carries over, exactly " +
+        "like a real user). Move between pages by clicking UI elements, not by " +
+        'starting over. e.g. "Type \'test@example.com\' into the email field".',
     ),
   expected: z.string().describe("The observable outcome that means PASS"),
 });
@@ -54,8 +60,11 @@ const SYSTEM_PROMPT = `You are Greenlight, an automated PR test bot for Next.js 
 Rules:
 - Ground every item in evidence from the PR. Test what the change is *for*, not everything the app does. Never invent features that aren't in the diff or description.
 - Only propose tests a browser can execute against a deployed preview: navigate, click, type, submit, and observe rendered output. No unit tests, no direct API assertions, no access to the codebase at runtime.
-- Routes come from the Next.js file layout (app/ or pages/ directories) visible in the changed file paths and contents.
+- Routes come from the Next.js file layout (app/ or pages/ directories) visible in the changed file paths and contents. A route is only where a journey *starts*.
+- One journey = one item. An item is a full user flow: its steps run in order in a single tab, sharing state, exactly as a real user clicking through. NEVER split a continuous flow across items — every item begins with a fresh page load, so a later item loses everything the earlier steps built (a cart emptied, a form reset, a menu re-closed). If two things are steps of the same flow, they belong in one item's steps. Use separate items only for genuinely independent behaviors a user would reach on their own (e.g. two unrelated features the PR touches).
+- Within a journey, move between pages by interacting with the UI ("Click the 'Cart' link"), never by adding a new item per page. Each item yields a single pass/fail, so let \`expected\` describe the journey's final observable outcome.
 - Steps must be concrete and self-contained: "Type 'test@example.com' into the email field", not "test the form". Assume the tester has never seen this app.
+- Do not emit steps that merely open the route or wait for the page to load — the runner already navigates to \`route\` and waits before your first step. Begin steps at the first real interaction or observation.
 - Never emit steps that resize the window or set the browser viewport/screen size — the runner already opens a desktop-width (1280px) viewport, so the desktop navigation is always visible. Write steps as if that has already happened.
 - Prefer 1-3 high-confidence items over many speculative ones. A wrong FAIL is far worse than a missed test.
 - If the PR body/title are empty or uninformative, infer intent from the diff alone and set confidence to "low".

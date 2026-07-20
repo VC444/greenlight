@@ -16,27 +16,13 @@ export const MOCK_PLAN: TestPlan = {
   items: [
     {
       intent:
-        "Verify the landing page header shows a new 'Say hi bro' navigation button.",
+        "Verify the header's 'Say hi bro' button appears and toggles its label to 'I said hi bro' when clicked.",
       route: "/",
       steps: [
-        "Navigate to the root route '/'.",
-        "Wait for the landing page to fully load.",
-        "Look at the top navigation bar to the right of the 'Pricing' link.",
+        "Click the 'Say hi bro' button in the header, to the right of the 'Pricing' link.",
       ],
       expected:
-        "A button with the text 'Say hi bro' is visible in the header between 'Pricing' and 'Get Started'.",
-    },
-    {
-      intent:
-        "Verify clicking the button changes its label to 'I said hi bro'.",
-      route: "/",
-      steps: [
-        "Navigate to the root route '/'.",
-        "Wait for the landing page to fully load.",
-        "Click the 'Say hi bro' button in the header.",
-      ],
-      expected:
-        "The button's text now reads 'I said hi bro' instead of 'say hi bro'.",
+        "The button, initially labelled 'Say hi bro', reads 'I said hi bro' after being clicked.",
     },
   ],
 };
