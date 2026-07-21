@@ -62,7 +62,7 @@ async function hasFreshThumbsDown(
 }
 
 function renderPlan(plan: TestPlan, headSha: string): string {
-  const lines: string[] = ["### 🟢 Greenlight — what I'll verify", ""];
+  const lines: string[] = ["### 🎄 Greenlight — what I'll verify", ""];
   const note =
     plan.confidence === "low" ? " _(low confidence — inferred from the diff alone)_" : "";
   lines.push(`${plan.summary}${note}`, "");
@@ -83,7 +83,7 @@ function renderPlan(plan: TestPlan, headSha: string): string {
 
 function renderNothingToTest(plan: TestPlan, headSha: string): string {
   return [
-    "### 🟢 Greenlight — nothing to verify",
+    "### 🎄 Greenlight — nothing to verify",
     "",
     plan.summary,
     "",
