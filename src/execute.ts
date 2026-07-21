@@ -44,9 +44,15 @@ const DIALOG_SUPPRESS = `
 `;
 
 const JudgeSchema = z.object({
-  passed: z
-    .boolean()
-    .describe("true ONLY if the expected outcome is clearly observable now"),
+  verdict: z
+    .enum(["pass", "fail", "cannot_tell"])
+    .describe(
+      '"pass" if the expected outcome is clearly present in the page\'s ' +
+        'DOM/accessibility tree; "fail" if it is clearly contradicted there; ' +
+        '"cannot_tell" if deciding would need something not in that tree — ' +
+        "purely visual styling (e.g. a highlight/color with no aria/data state), " +
+        "the browser URL, or a native dialog",
+    ),
   reasoning: z
     .string()
     .describe("one sentence citing what on the page decided the verdict"),
@@ -222,14 +228,25 @@ async function runItem(
     }
 
     // Judge `expected` against the page via Stagehand's DOM-grounded extract.
-    // Note: this only sees the DOM/accessibility tree, so expectations about
-    // native dialogs (alert/confirm/prompt) aren't judged here — deferred.
+    // It sees only the DOM/accessibility tree — not rendered pixels, styling,
+    // the URL, or native dialogs — so an expectation that hinges on any of those
+    // is genuinely unjudgeable here. Rather than force a pass/fail (a visual-only
+    // highlight the human sees in the replay would read as a false fail), the
+    // judge can answer "cannot_tell".
     const judgment = await stagehand.extract(
-      `Determine whether this expectation is now satisfied: "${item.expected}". ` +
-        `Answer passed=true only if it is clearly met.`,
+      `Determine whether this expectation is satisfied: "${item.expected}".\n` +
+        `You can see only the page's DOM/accessibility tree — not its rendered ` +
+        `pixels or CSS, the browser URL, or native dialogs. Answer "pass" only ` +
+        `if the outcome is clearly present there, "fail" if it is clearly ` +
+        `contradicted, and "cannot_tell" if judging it would need something you ` +
+        `cannot see.`,
       JudgeSchema,
     );
-    verdict = judgment.passed ? "pass" : "fail";
+    // "cannot_tell" is not a test failure — it's a blind spot of a DOM-only
+    // judge. Treat it like an execution gap: uncertain, so callers stay silent
+    // (never a wrong red).
+    verdict =
+      judgment.verdict === "cannot_tell" ? "uncertain" : judgment.verdict;
     reasoning = judgment.reasoning;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);

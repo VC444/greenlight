@@ -63,7 +63,9 @@ function renderItems(items: ItemEvidence[]): string {
       const detail = item.error ?? item.reasoning;
       if (detail) lines.push(`  ${detail}`);
       if (item.consoleErrors.length) {
-        lines.push(`  <sub>${item.consoleErrors.length} console error(s) during this journey</sub>`);
+        lines.push(
+          `  <sub>${item.consoleErrors.length} console error(s) during this journey</sub>`,
+        );
       }
       return lines.join("\n");
     })
@@ -92,24 +94,33 @@ async function postCheckRun(
   const summary = `${plan.summary}\n\n**${headline(t)}** across ${t.total} check(s).${replayLine(result)}`;
 
   try {
-    const { data } = await octokit.request("POST /repos/{owner}/{repo}/check-runs", {
-      owner: job.owner,
-      repo: job.repo,
-      name: CHECK_NAME,
-      head_sha: job.headSha,
-      status: "completed",
-      conclusion: conclusion(t),
-      completed_at: new Date().toISOString(),
-      output: {
-        title: headline(t),
-        summary,
-        text: renderItems(result.items),
+    const { data } = await octokit.request(
+      "POST /repos/{owner}/{repo}/check-runs",
+      {
+        owner: job.owner,
+        repo: job.repo,
+        name: CHECK_NAME,
+        head_sha: job.headSha,
+        status: "completed",
+        conclusion: conclusion(t),
+        completed_at: new Date().toISOString(),
+        output: {
+          title: headline(t),
+          summary,
+          text: renderItems(result.items),
+        },
       },
-    });
-    console.log(`posted check run for ${label}: ${conclusion(t)} (${headline(t)})`);
+    );
+    console.log(
+      `posted check run for ${label}: ${conclusion(t)} (${headline(t)})`,
+    );
     return data.html_url ?? null;
   } catch (error) {
-    if (typeof error === "object" && error !== null && (error as { status?: number }).status === 403) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { status?: number }).status === 403
+    ) {
       console.warn(
         `check run for ${label} forbidden — the GitHub App needs "Checks: Read & write". ` +
           `Grant it in the App's repository permissions and accept the update. Posting the results comment only.`,
@@ -144,7 +155,7 @@ function renderResultsComment(
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
   lines.push(
     "",
-    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · a ❌ is a finding to look at, not a merge blocker · ❔ means the run itself couldn't complete</sub>`,
+    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · a ❌ is a finding to look at, not a merge blocker · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page)</sub>`,
   );
   return lines.join("\n");
 }
@@ -155,7 +166,12 @@ async function findResultsComment(
 ): Promise<number | null> {
   const { data: comments } = await octokit.request(
     "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
-    { owner: job.owner, repo: job.repo, issue_number: job.prNumber, per_page: 100 },
+    {
+      owner: job.owner,
+      repo: job.repo,
+      issue_number: job.prNumber,
+      per_page: 100,
+    },
   );
   for (const comment of comments) {
     if (comment.body && RESULTS_MARKER_RE.test(comment.body)) return comment.id;
@@ -177,20 +193,26 @@ async function upsertResultsComment(
   const existingId = await findResultsComment(octokit, job);
 
   if (existingId !== null) {
-    await octokit.request("PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}", {
-      owner: job.owner,
-      repo: job.repo,
-      comment_id: existingId,
-      body,
-    });
+    await octokit.request(
+      "PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}",
+      {
+        owner: job.owner,
+        repo: job.repo,
+        comment_id: existingId,
+        body,
+      },
+    );
     console.log(`updated results comment on ${label}`);
   } else {
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner: job.owner,
-      repo: job.repo,
-      issue_number: job.prNumber,
-      body,
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner: job.owner,
+        repo: job.repo,
+        issue_number: job.prNumber,
+        body,
+      },
+    );
     console.log(`posted results comment on ${label}`);
   }
 }
