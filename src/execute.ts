@@ -63,7 +63,6 @@ export interface ItemEvidence {
   route: string;
   verdict: "pass" | "fail" | "uncertain";
   reasoning: string;
-  screenshot: Buffer | null;
   consoleErrors: string[];
   error: string | null;
 }
@@ -209,7 +208,6 @@ async function runItem(
   page.on("console", onConsole);
 
   let error: string | null = null;
-  let screenshot: Buffer | null = null;
   let verdict: ItemEvidence["verdict"] = "uncertain";
   let reasoning = "";
 
@@ -233,11 +231,8 @@ async function runItem(
     );
     verdict = judgment.passed ? "pass" : "fail";
     reasoning = judgment.reasoning;
-    screenshot = await page.screenshot({ fullPage: true });
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
-    // Best-effort screenshot for debugging even on failure.
-    screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
   } finally {
     page.off("console", onConsole);
   }
@@ -255,7 +250,6 @@ async function runItem(
     route: item.route,
     verdict,
     reasoning,
-    screenshot,
     consoleErrors,
     error,
   };
