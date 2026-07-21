@@ -31,12 +31,22 @@ async function findPlanComment(
 ): Promise<ExistingPlanComment | null> {
   const { data: comments } = await octokit.request(
     "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
-    { owner: job.owner, repo: job.repo, issue_number: job.prNumber, per_page: 100 },
+    {
+      owner: job.owner,
+      repo: job.repo,
+      issue_number: job.prNumber,
+      per_page: 100,
+    },
   );
   for (const comment of comments) {
     const match = comment.body?.match(MARKER_RE);
     if (match?.[1] && match[2]) {
-      return { id: comment.id, body: comment.body ?? "", hash: match[1], generatedAt: match[2] };
+      return {
+        id: comment.id,
+        body: comment.body ?? "",
+        hash: match[1],
+        generatedAt: match[2],
+      };
     }
   }
   return null;
@@ -64,7 +74,9 @@ async function hasFreshThumbsDown(
 function renderPlan(plan: TestPlan, headSha: string): string {
   const lines: string[] = ["### 🎄 Greenlight — what I'll verify", ""];
   const note =
-    plan.confidence === "low" ? " _(low confidence — inferred from the diff alone)_" : "";
+    plan.confidence === "low"
+      ? " _(low confidence — inferred from the diff alone)_"
+      : "";
   lines.push(`${plan.summary}${note}`, "");
   for (const item of plan.items) {
     lines.push(`- [x] **${item.intent}** — \`${item.route}\``);
@@ -106,14 +118,19 @@ export async function upsertPlanComment(
 
   // Never open the conversation just to say there's nothing to do.
   if (!existing && plan.items.length === 0) {
-    console.log(`no testable items for ${label} and no existing comment — staying silent`);
+    console.log(
+      `no testable items for ${label} and no existing comment — staying silent`,
+    );
     return;
   }
 
   if (existing) {
-    const humanEdited = contentHash(stripMarker(existing.body)) !== existing.hash;
+    const humanEdited =
+      contentHash(stripMarker(existing.body)) !== existing.hash;
     if (humanEdited && !(await hasFreshThumbsDown(octokit, job, existing))) {
-      console.log(`plan comment on ${label} was human-edited — preserving their corrections`);
+      console.log(
+        `plan comment on ${label} was human-edited — preserving their corrections`,
+      );
       return;
     }
   }
@@ -125,20 +142,26 @@ export async function upsertPlanComment(
   const body = `<!-- greenlight:plan hash:${contentHash(content)} at:${new Date().toISOString()} -->\n${content}`;
 
   if (existing) {
-    await octokit.request("PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}", {
-      owner: job.owner,
-      repo: job.repo,
-      comment_id: existing.id,
-      body,
-    });
+    await octokit.request(
+      "PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}",
+      {
+        owner: job.owner,
+        repo: job.repo,
+        comment_id: existing.id,
+        body,
+      },
+    );
     console.log(`updated plan comment on ${label}`);
   } else {
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner: job.owner,
-      repo: job.repo,
-      issue_number: job.prNumber,
-      body,
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner: job.owner,
+        repo: job.repo,
+        issue_number: job.prNumber,
+        body,
+      },
+    );
     console.log(`posted plan comment on ${label}`);
   }
 }
