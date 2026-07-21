@@ -5,6 +5,7 @@ import { generateTestPlan, type TestPlan } from "./testplan.js";
 import { upsertPlanComment } from "./comment.js";
 import { waitForPreview } from "./preview.js";
 import { runPlan } from "./execute.js";
+import { reportResults } from "./results.js";
 import { config } from "./config.js";
 import { MOCK_PLAN } from "./mockPlan.js";
 
@@ -58,6 +59,8 @@ async function processJob(job: PullRequestJob): Promise<void> {
             `${pass} pass, ${fail} fail, ${uncertain} uncertain` +
             ` — replay ${result.replayUrl ?? "n/a"}`,
         );
+        // Surface the verdicts on the PR: check run + results comment.
+        await reportResults(octokit, job, plan, result);
       }
       break;
     }
