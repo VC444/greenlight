@@ -74,7 +74,7 @@ function renderItems(items: ItemEvidence[]): string {
 
 function replayLine(result: ExecutionResult): string {
   return result.replayUrl
-    ? `\n\n▶️ [Watch the session replay](${result.replayUrl}) <sub>(Browserbase links expire after 7 days)</sub>`
+    ? `\n\n▶️ [Watch the session replay](${result.replayUrl})`
     : "";
 }
 
