@@ -72,14 +72,14 @@ async function hasFreshThumbsDown(
 }
 
 function renderPlan(plan: TestPlan, headSha: string): string {
-  const lines: string[] = ["### 🎄 Greenlight — what I'll verify", ""];
+  const lines: string[] = ["### 🎄 Greenlight: what I'll verify", ""];
   const note =
     plan.confidence === "low"
-      ? " _(low confidence — inferred from the diff alone)_"
+      ? " _(low confidence, inferred from the diff alone)_"
       : "";
   lines.push(`${plan.summary}${note}`, "");
   for (const item of plan.items) {
-    lines.push(`- [x] **${item.intent}** — \`${item.route}\``);
+    lines.push(`- [x] **${item.intent}** (\`${item.route}\`)`);
     for (const [i, step] of item.steps.entries()) {
       lines.push(`  ${i + 1}. ${step}`);
     }
@@ -95,7 +95,7 @@ function renderPlan(plan: TestPlan, headSha: string): string {
 
 function renderNothingToTest(plan: TestPlan, headSha: string): string {
   return [
-    "### 🎄 Greenlight — nothing to verify",
+    "### 🎄 Greenlight: nothing to verify",
     "",
     plan.summary,
     "",
@@ -119,7 +119,7 @@ export async function upsertPlanComment(
   // Never open the conversation just to say there's nothing to do.
   if (!existing && plan.items.length === 0) {
     console.log(
-      `no testable items for ${label} and no existing comment — staying silent`,
+      `no testable items for ${label} and no existing comment; staying silent`,
     );
     return;
   }
@@ -129,7 +129,7 @@ export async function upsertPlanComment(
       contentHash(stripMarker(existing.body)) !== existing.hash;
     if (humanEdited && !(await hasFreshThumbsDown(octokit, job, existing))) {
       console.log(
-        `plan comment on ${label} was human-edited — preserving their corrections`,
+        `plan comment on ${label} was human-edited; preserving their corrections`,
       );
       return;
     }
