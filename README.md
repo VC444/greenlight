@@ -1,7 +1,7 @@
 # Greenlight
 
 Greenlight tests your pull requests without asking anyone to write tests. On
-every PR it reads the diff, works out what the change is *for*, drives the
+every PR it reads the diff, works out what the change is _for_, drives the
 Vercel preview deployment in a real browser to check it, and reports what it
 found: a plan comment, a results comment, a check run, and a downloadable
 session replay.
@@ -14,15 +14,11 @@ scope for now.
 merge. When a run can't establish something, it says Inconclusive (❔) instead
 of failing you, and when it has nothing useful to say, it says nothing.
 
-<!-- screenshot: plan comment + results comment (add after first public run) -->
+## Steps to run
 
-## Add it to a repo
-
-You need a repo that gets Vercel preview deployments on PRs (the standard
-Vercel GitHub integration), and a [Fireworks API
+You need a repo that gets Vercel preview deployments on PRs, and a [Fireworks API
 key](https://app.fireworks.ai/settings/users/api-keys). Greenlight runs
-entirely inside your GitHub Actions runner with your keys. There is no server
-to host, no account to create, and nothing phones home.
+entirely inside your GitHub Actions runner with your keys.
 
 **1. Add the secret.** Repo → Settings → Secrets and variables → Actions:
 
@@ -95,14 +91,14 @@ The plan comment is Greenlight's contract with you before it runs:
 
 ## Inputs
 
-| Input | Required | Description |
-| --- | --- | --- |
-| `llm-api-key` | yes | Fireworks API key. Drives both plan generation and the browser run. |
-| `vercel-bypass-secret` | no | Vercel protection-bypass secret, for protected previews. |
-| `model` | no | Override the model that writes the test plan. |
-| `executor-model` | no | Override the model that drives and judges browser steps. Must stay in the kimi/deepseek/glm families; Stagehand only grammar-enforces its schemas for those. |
-| `inline-images` | no | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts. |
-| `replay-retention-days` | no | How long to keep the replay artifact (default `14`). |
+| Input                   | Required | Description                                                                                                                                                  |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `llm-api-key`           | yes      | Fireworks API key. Drives both plan generation and the browser run.                                                                                          |
+| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                     |
+| `model`                 | no       | Override the model that writes the test plan.                                                                                                                |
+| `executor-model`        | no       | Override the model that drives and judges browser steps. Must stay in the kimi/deepseek/glm families; Stagehand only grammar-enforces its schemas for those. |
+| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.                                 |
+| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                                                         |
 
 With the default models a typical PR costs a few cents in Fireworks credits.
 
