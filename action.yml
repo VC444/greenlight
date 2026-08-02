@@ -18,12 +18,13 @@ inputs:
     default: ""
   model:
     description: >-
-      Model to run, as "provider/model" — e.g. "anthropic/claude-opus-5",
-      "openai/gpt-5", "google/gemini-3-flash", or an
-      OpenAI-compatible host: "fireworks/…", "together/…", "openrouter/…".
-      Defaults to Fireworks-hosted Kimi.
-    required: false
-    default: ""
+      Model to run, as "provider/model" — the reference setup is
+      "fireworks/accounts/fireworks/models/kimi-k2p7-code". Native providers
+      work too ("anthropic/claude-opus-5", "openai/gpt-5",
+      "google/gemini-3-flash"), as do the other OpenAI-compatible hosts
+      ("together/…", "openrouter/…"). No default: the run fails unless you
+      name one.
+    required: true
   executor-model:
     description: >-
       Override the model that drives and judges browser steps; same
@@ -69,13 +70,18 @@ runs:
     # `required: true` is not enforced for composite actions, and a workflow
     # referencing a secret that was never created passes an empty string — fail
     # loudly here rather than running a pipeline that can only stay silent.
-    - name: Verify required secrets
+    - name: Verify required inputs
       shell: bash
       env:
         LLM_API_KEY: ${{ inputs.llm-api-key }}
+        MODEL: ${{ inputs.model }}
       run: |
         if [ -z "$LLM_API_KEY" ]; then
           echo "::error::llm-api-key is empty. Add your LLM provider's API key to the repository's Actions secrets and pass it to this step via the llm-api-key input. (Note: repository secrets are not available to workflows triggered from forks.)"
+          exit 1
+        fi
+        if [ -z "$MODEL" ]; then
+          echo "::error::model is empty. Name the model to run as \"provider/model\" — e.g. model: fireworks/accounts/fireworks/models/kimi-k2p7-code. There is no default; the key you supply must belong to the provider you name."
           exit 1
         fi
 

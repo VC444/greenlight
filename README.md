@@ -18,9 +18,9 @@ of failing you, and when it has nothing useful to say, it says nothing.
 
 You need a repo that gets Vercel preview deployments on PRs, and an API key for
 an LLM provider — Anthropic, OpenAI, Google, or any OpenAI-compatible host
-(see [Choosing a model](#choosing-a-model)). The default is a [Fireworks API
-key](https://app.fireworks.ai/settings/users/api-keys). Greenlight runs
-entirely inside your GitHub Actions runner with your keys.
+(see [Choosing a model](#choosing-a-model)). You name the model explicitly;
+there is no default. Greenlight runs entirely
+inside your GitHub Actions runner with your keys.
 
 **1. Add the secret.** Repo → Settings → Secrets and variables → Actions:
 
@@ -61,7 +61,8 @@ jobs:
         with:
           llm-api-key: ${{ secrets.GREENLIGHT_API_KEY }}
           vercel-bypass-secret: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          # model: anthropic/claude-opus-5   # optional; see "Choosing a model"
+          # required; see "Choosing a model"
+          model: anthropic/claude-opus-5
 ```
 
 **3. Open a pull request.** That's the whole setup.
@@ -94,26 +95,27 @@ The plan comment is Greenlight's contract with you before it runs:
 
 ## Inputs
 
-| Input                   | Required | Description                                                                                                                     |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                     |
-| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                        |
-| `model`                 | no       | `provider/model` to run. Defaults to Fireworks-hosted Kimi. See [Choosing a model](#choosing-a-model).                          |
-| `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                              |
+| Input                   | Required | Description                                                                                                                                                              |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                                              |
+| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                                 |
+| `model`                 | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                                               |
+| `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                                       |
 | `visual-judge-model`    | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. `off` disables. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
-| `base-url`              | no       | Override the built-in endpoint for an OpenAI-compatible provider (e.g. a gateway that fronts it).                               |
-| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.    |
-| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                            |
+| `base-url`              | no       | Override the built-in endpoint for an OpenAI-compatible provider (e.g. a gateway that fronts it).                                                                        |
+| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.                                             |
+| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                                                                     |
 
 ## Choosing a model
 
-`model` takes a `provider/model` string. One key drives both the test plan and
-the browser run.
+`model` is required and takes a `provider/model` string. One key drives both the
+test plan and the browser run, so the key you pass must belong to the provider
+you name.
 
-| Provider                                    | Example                                                       |
-| ------------------------------------------- | ------------------------------------------------------------- |
-| `anthropic`, `openai`, `google`             | `anthropic/claude-opus-5`, `openai/gpt-5`                     |
-| `fireworks` (default), `together`, `openrouter` | `fireworks/accounts/fireworks/models/kimi-k2p7-code`        |
+| Provider                              | Example                                       |
+| ------------------------------------- | --------------------------------------------- |
+| `fireworks`, `together`, `openrouter` | `fireworks/accounts/fireworks/models/kimi-k3` |
+| `anthropic`, `openai`, `google`       | `anthropic/claude-opus-5`, `openai/gpt-5`     |
 
 A model id with no provider prefix is read as a Fireworks model, which is what
 `model` meant before providers were selectable — existing configs keep working.
@@ -152,30 +154,22 @@ expectations are all readable costs nothing extra.
 
 Left unset, it picks a model on the provider you're already using: your
 `executor-model` on `anthropic`, `openai` and `google`, all of which can see,
-and Fireworks-hosted Kimi K3 on `fireworks`, whose default model is text-only.
+and Fireworks-hosted Kimi K3 on `fireworks`, whose usual models are text-only.
 It will never reach for a different vendor on its own — one key setting feeds
 every provider, so a cross-provider default would send your key somewhere you
 didn't choose. On `together` and `openrouter`, name a vision model in
 `visual-judge-model` to turn the escalation on; `off` disables it anywhere.
 
-With the default models a typical PR costs a few cents in Fireworks credits;
-frontier models from the native providers cost meaningfully more.
+## Limits worth knowing
 
-## What Greenlight can't judge
-
-The judge reads the page's DOM and accessibility tree. It does not see pixels.
-That means some honest limits:
-
-- **No visual assertions.** "The button is misaligned" or "the color is wrong"
-  is invisible to it.
 - **No native browser dialogs.** `alert()`/`confirm()` are suppressed to keep
   the session alive; expectations about them can't be checked.
-- **Anything it can't establish from the page comes back ❔ Inconclusive**:
-  expected, honest, and never a red check. If a run breaks midway, that item is
-  Inconclusive too, not a failure.
-
-One more note: text typed during a run comes from the plan steps and is
-recorded readably in the replay artifact. Don't put secrets in plan steps.
+- **With the visual judge off, visual expectations can't be judged.** That's the
+  case when `visual-judge-model: off`, or when it's unset on `together` and
+  `openrouter`.
+- **Anything it can't establish comes back ❔ Inconclusive**: expected, honest,
+  and never a red check. If a run breaks midway, that item is Inconclusive too,
+  not a failure.
 
 ## License
 
