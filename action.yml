@@ -41,6 +41,19 @@ inputs:
 runs:
   using: composite
   steps:
+    # `required: true` is not enforced for composite actions, and a workflow
+    # referencing a secret that was never created passes an empty string — fail
+    # loudly here rather than running a pipeline that can only stay silent.
+    - name: Verify required secrets
+      shell: bash
+      env:
+        LLM_API_KEY: ${{ inputs.llm-api-key }}
+      run: |
+        if [ -z "$LLM_API_KEY" ]; then
+          echo "::error::llm-api-key is empty. Add your LLM provider's API key to the repository's Actions secrets and pass it to this step via the llm-api-key input. (Note: repository secrets are not available to workflows triggered from forks.)"
+          exit 1
+        fi
+
     - uses: actions/setup-node@v4
       with:
         node-version: "22"

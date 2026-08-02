@@ -150,6 +150,17 @@ const SCHEMA_NOTE = `\n\nRespond with a single JSON object matching this JSON sc
 export async function generateTestPlan(
   ctx: PrContext,
 ): Promise<TestPlan | null> {
+  // Catch a missing key before the SDK does — its error is provider-specific
+  // ("See https://docs.fireworks.ai/...") and says nothing about where the key
+  // was supposed to come from.
+  if (!process.env.FIREWORKS_API_KEY) {
+    console.warn(
+      "no LLM API key configured — add one to your repository's Actions " +
+        "secrets and pass it via the Action's `llm-api-key` input (or set " +
+        "FIREWORKS_API_KEY in the environment when running the server). Skipping.",
+    );
+    return null;
+  }
   // One retry covers transient upstream errors and the rare truncated response.
   const MAX_ATTEMPTS = 2;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
