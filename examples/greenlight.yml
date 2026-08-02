@@ -29,7 +29,7 @@ jobs:
     # Forks do not get secrets, so the run could never reach the model.
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: <owner>/greenlight@v1
+      - uses: VC444/greenlight@v1
         with:
           llm-api-key: ${{ secrets.FIREWORKS_API_KEY }}
           # Only needed if preview deployments are protected (Vercel Pro/Team

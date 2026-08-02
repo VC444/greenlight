@@ -7,9 +7,9 @@ import type { TestPlan } from "./testplan.js";
  * model's output. Edit these items to match whatever the preview under test
  * actually serves — they drive both the posted comment and the browser run.
  */
-// Captured from a real Fireworks run against VC444/art-ai#6 (the promo-code
-// PR) so the pipeline is exercised against representative model output. Swap
-// these items whenever the preview changes.
+// Captured from a real Fireworks run against a test repo's promo-code PR so
+// the pipeline is exercised against representative model output. Swap these
+// items whenever the preview changes.
 export const MOCK_PLAN: TestPlan = {
   summary:
     "This PR adds a promo code input to the landing page pricing section that discounts both credit packages when a valid code is entered.",

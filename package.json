@@ -2,7 +2,7 @@
   "name": "greenlight",
   "version": "0.1.0",
   "private": true,
-  "description": "AI PR test bot — GitHub App that tests Vercel previews of Next.js PRs",
+  "description": "Github Action that infers what a PR is meant to do and tests its Vercel preview in a real browser",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
