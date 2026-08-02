@@ -1,3 +1,4 @@
+import "./quiet.js";
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import { Octokit } from "@octokit/core";

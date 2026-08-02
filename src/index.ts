@@ -1,3 +1,4 @@
+import "./quiet.js";
 import express from "express";
 import { config } from "./config.js";
 import { webhookMiddleware } from "./receiver.js";
