@@ -10,6 +10,7 @@
     "smee": "node --env-file=.env scripts/smee.mjs",
     "typecheck": "tsc --noEmit"
   },
+  "packageManager": "pnpm@10.1.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
