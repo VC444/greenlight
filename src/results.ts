@@ -144,7 +144,7 @@ function renderResultsComment(
 ): string {
   const t = tally(result.items);
   const lines = [
-    `### 🎄 Greenlight — results`,
+    `### 🎄 Greenlight Results:`,
     "",
     `**${headline(t)}** across ${t.total} check(s).`,
     "",
