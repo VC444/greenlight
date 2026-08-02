@@ -17,6 +17,9 @@
     ]
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4",
+    "@ai-sdk/google": "^4",
+    "@ai-sdk/openai": "^4",
     "@ai-sdk/openai-compatible": "^3.0.12",
     "@browserbasehq/stagehand": "^3.7.0",
     "@octokit/app": "^16.1.2",

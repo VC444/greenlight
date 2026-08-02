@@ -60,13 +60,13 @@ export const config = {
   // How long to wait for a Vercel preview to build before giving up (staying
   // silent, never red). Vercel Next.js previews are typically well under this.
   previewTimeoutMs: Number(process.env.PREVIEW_TIMEOUT_MS ?? 300_000),
-  // Testing switch: when set, skip the Fireworks call and drive the pipeline
+  // Testing switch: when set, skip the test-plan LLM call and drive the pipeline
   // from src/mockPlan.ts instead, so preview access + browser automation can be
   // validated deterministically without spending credits. Off = real model.
   useMockPlan: process.env.GREENLIGHT_MOCK_PLAN === "1",
   // Testing switch: run the browser locally (Stagehand env "LOCAL", a Chrome on
   // this machine) instead of opening a Browserbase cloud session. No Browserbase
-  // credits are spent and no API key/project id is required — only Fireworks
+  // credits are spent and no API key/project id is required — only the LLM key
   // (which still drives act/extract). Ideal for iterating for free; prod stays
   // on Browserbase (unset). LLM inference is identical in both modes.
   localBrowser: process.env.GREENLIGHT_LOCAL_BROWSER === "1",

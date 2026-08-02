@@ -3,11 +3,11 @@ import type { TestPlan } from "./testplan.js";
 /**
  * A fixed test plan used when GREENLIGHT_MOCK_PLAN=1, so the pipeline
  * (comment → preview resolution → browser execution) can be exercised
- * deterministically without spending Fireworks credits or depending on the
- * model's output. Edit these items to match whatever the preview under test
+ * deterministically without spending LLM credits or depending on the model's
+ * output. Edit these items to match whatever the preview under test
  * actually serves — they drive both the posted comment and the browser run.
  */
-// Captured from a real Fireworks run against a test repo's promo-code PR so
+// Captured from a real model run against a test repo's promo-code PR so
 // the pipeline is exercised against representative model output. Swap these
 // items whenever the preview changes.
 export const MOCK_PLAN: TestPlan = {

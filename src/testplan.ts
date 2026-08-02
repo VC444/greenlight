@@ -1,24 +1,8 @@
 import "dotenv/config";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import type { PrContext } from "./context.js";
-
-// Fireworks via the generic OpenAI-compatible factory rather than
-// @ai-sdk/fireworks: the dedicated package never sets
-// supportsStructuredOutputs, which makes the SDK silently drop the JSON
-// schema from requests. With the flag on, Fireworks receives the schema and
-// enforces it at decode time (grammar-constrained — malformed output is
-// impossible, not just discouraged).
-const fireworks = createOpenAICompatible({
-  name: "fireworks",
-  baseURL: "https://api.fireworks.ai/inference/v1",
-  apiKey: process.env.FIREWORKS_API_KEY,
-  supportsStructuredOutputs: true,
-});
-
-const MODEL =
-  process.env.GREENLIGHT_MODEL || "accounts/fireworks/models/kimi-k2p7-code";
+import { describe, languageModel, planModelSpec } from "./llm.js";
 
 const TestPlanItemSchema = z.object({
   intent: z
@@ -143,30 +127,26 @@ function salvagePlan(raw: string | undefined): TestPlan | null {
   }
 }
 
-// The response_format schema is enforced during decoding, but the model never
-// actually reads it — Fireworks recommends also stating it in the prompt.
+// Hosts that enforce the schema at decode time still never show it to the
+// model, and hosts that don't enforce it have only this to go on — so state it
+// in the prompt either way.
 const SCHEMA_NOTE = `\n\nRespond with a single JSON object matching this JSON schema:\n${JSON.stringify(z.toJSONSchema(TestPlanSchema))}`;
 
 export async function generateTestPlan(
   ctx: PrContext,
 ): Promise<TestPlan | null> {
-  // Catch a missing key before the SDK does — its error is provider-specific
+  // Resolve credentials before the SDK does — its error is provider-specific
   // ("See https://docs.fireworks.ai/...") and says nothing about where the key
-  // was supposed to come from.
-  if (!process.env.FIREWORKS_API_KEY) {
-    console.warn(
-      "no LLM API key configured — add one to your repository's Actions " +
-        "secrets and pass it via the Action's `llm-api-key` input (or set " +
-        "FIREWORKS_API_KEY in the environment when running the server). Skipping.",
-    );
-    return null;
-  }
+  // was supposed to come from. A null here has already been explained.
+  const spec = planModelSpec();
+  if (!spec) return null;
+  const model = languageModel(spec);
   // One retry covers transient upstream errors and the rare truncated response.
   const MAX_ATTEMPTS = 2;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const result = await generateText({
-        model: fireworks.chatModel(MODEL),
+        model,
         output: Output.object({ schema: TestPlanSchema }),
         system: SYSTEM_PROMPT + SCHEMA_NOTE,
         prompt: renderContext(ctx),
@@ -212,6 +192,8 @@ export async function generateTestPlan(
       return null;
     }
   }
-  console.warn(`test plan generation failed after ${MAX_ATTEMPTS} attempts`);
+  console.warn(
+    `test plan generation failed after ${MAX_ATTEMPTS} attempts (${describe(spec)})`,
+  );
   return null;
 }

@@ -5,6 +5,12 @@ import type { TestPlan } from "./testplan.js";
 import { withBypass } from "./preview.js";
 import { config } from "./config.js";
 import {
+  describe,
+  executorModelSpec,
+  executorSchemaWarning,
+  stagehandModelConfig,
+} from "./llm.js";
+import {
   drainEvents,
   isRecording,
   recorderInitScript,
@@ -49,25 +55,10 @@ async function pageState(page: StagehandPage): Promise<string> {
 // it proceeds with whatever has loaded, it never fails the item.
 const ASSET_SETTLE_MS = 30_000;
 
-// Stagehand's act/extract reasoning runs on OUR Fireworks model, not the
-// Browserbase Model Gateway (disableAPI keeps it all local). We let Stagehand
-// build the provider itself from a "prefix/model" string (its own AI SDK stack)
-// rather than injecting a model — injecting one crosses a version boundary
-// (this app is on ai@7, Stagehand bundles ai@5) and breaks at runtime.
-//
-// The provider PREFIX matters: "openai/…" maps to @ai-sdk/openai, whose default
-// hits OpenAI's *Responses* API — which Fireworks doesn't implement. "togetherai/…"
-// maps to an OpenAI-*compatible* provider that hits /chat/completions and honors
-// a custom baseURL — exactly what Fireworks serves.
-const FIREWORKS_PROVIDER_PREFIX = "togetherai";
-const FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1";
-const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY ?? "";
-// Must stay a kimi-family model: Stagehand only grammar-enforces its act/extract
-// schemas for kimi/deepseek/glm (others free-guess the shape and fail Zod). Kept
-// separate from the plan model (GREENLIGHT_MODEL) so that setting can't leak here.
-const EXECUTOR_MODEL =
-  process.env.GREENLIGHT_EXECUTOR_MODEL ||
-  "accounts/fireworks/models/kimi-k2p7-code";
+// Stagehand's act/extract reasoning runs on OUR model, not the Browserbase
+// Model Gateway (disableAPI keeps it all local). Which model that is comes from
+// src/llm.ts, the same resolution the test plan uses; see stagehandModelConfig
+// for why Stagehand gets coordinates rather than a model instance.
 
 // A native alert/confirm/prompt over CDP FREEZES the page (Stagehand has no
 // built-in dialog dismissal), which would deadlock act/extract until the session
@@ -137,10 +128,10 @@ function releaseSlot(): void {
 }
 
 /** True when everything execution needs is configured: the LLM that drives +
- *  judges the steps (Fireworks), plus a browser. Local mode needs no Browserbase
+ *  judges the steps, plus a browser. Local mode needs no Browserbase
  *  credentials; remote mode needs both the API key and project id. */
 export function canExecute(): boolean {
-  if (!FIREWORKS_API_KEY) return false;
+  if (!executorModelSpec()) return false;
   if (config.localBrowser) return true;
   return Boolean(config.browserbaseApiKey && config.browserbaseProjectId);
 }
@@ -160,27 +151,26 @@ export async function runPlan(
   previewUrl: string,
   plan: TestPlan,
 ): Promise<ExecutionResult | null> {
-  if (!canExecute()) {
+  const spec = executorModelSpec();
+  if (!spec || !canExecute()) {
     console.warn(
-      "execution not configured (needs FIREWORKS_API_KEY plus either " +
+      "execution not configured (needs an LLM API key plus either " +
         "GREENLIGHT_LOCAL_BROWSER=1 or BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID) — skipping",
     );
     return null;
   }
+  const schemaWarning = executorSchemaWarning(spec);
+  if (schemaWarning) console.warn(schemaWarning);
 
   await acquireSlot();
-  // Reason locally on our Fireworks model (disableAPI) — never route act/extract
+  // Reason locally on our own model (disableAPI) — never route act/extract
   // through Browserbase's server-side API / Model Gateway. Browser location is
   // the only thing that differs between local and remote.
   const modelConfig = {
     disableAPI: true,
     verbose: (DEBUG ? 2 : 0) as 0 | 1 | 2,
     disablePino: true,
-    model: {
-      modelName: `${FIREWORKS_PROVIDER_PREFIX}/${EXECUTOR_MODEL}`,
-      apiKey: FIREWORKS_API_KEY,
-      baseURL: FIREWORKS_BASE_URL,
-    },
+    model: stagehandModelConfig(spec),
   };
   const stagehand = config.localBrowser
     ? new Stagehand({
@@ -212,8 +202,8 @@ export async function runPlan(
       : config.actionRunUrl || undefined;
     console.log(
       config.localBrowser
-        ? `local browser session (model ${EXECUTOR_MODEL})`
-        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"}`,
+        ? `local browser session (model ${describe(spec)})`
+        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"} (model ${describe(spec)})`,
     );
 
     const page =

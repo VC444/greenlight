@@ -6,7 +6,9 @@ branding:
 
 inputs:
   llm-api-key:
-    description: "Fireworks API key. Drives both test-plan generation and the browser run."
+    description: >-
+      API key for the LLM provider named in `model`. Drives both test-plan
+      generation and the browser run.
     required: true
   vercel-bypass-secret:
     description: >-
@@ -15,14 +17,27 @@ inputs:
     required: false
     default: ""
   model:
-    description: "Override the model used to generate the test plan."
+    description: >-
+      Model to run, as "provider/model" — e.g. "anthropic/claude-opus-5",
+      "openai/gpt-5", "google/gemini-3-flash", or an
+      OpenAI-compatible host: "fireworks/…", "together/…", "openrouter/…".
+      Defaults to Fireworks-hosted Kimi.
     required: false
     default: ""
   executor-model:
     description: >-
-      Override the model that drives and judges browser steps. Must stay in the
-      kimi/deepseek/glm families — Stagehand only grammar-enforces its schemas
-      for those.
+      Override the model that drives and judges browser steps; same
+      "provider/model" syntax. Defaults to `model`. On the generic
+      OpenAI-compatible route, stay in the kimi/deepseek/glm families —
+      Stagehand only enforces its act/extract schemas for those. Native
+      providers (anthropic, openai, google) have no such constraint.
+    required: false
+    default: ""
+  base-url:
+    description: >-
+      Overrides the built-in endpoint for an OpenAI-compatible provider —
+      point "fireworks/…", "together/…" or "openrouter/…" at a gateway or
+      proxy that fronts it. Ignored for the native providers.
     required: false
     default: ""
   inline-images:
@@ -96,10 +111,11 @@ runs:
         GREENLIGHT_LOCAL_BROWSER: "1"
         # No display on a runner; rrweb records the DOM, so nothing is lost.
         GREENLIGHT_HEADLESS: "1"
-        FIREWORKS_API_KEY: ${{ inputs.llm-api-key }}
+        GREENLIGHT_LLM_API_KEY: ${{ inputs.llm-api-key }}
         VERCEL_AUTOMATION_BYPASS_SECRET: ${{ inputs.vercel-bypass-secret }}
         GREENLIGHT_MODEL: ${{ inputs.model }}
         GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
+        GREENLIGHT_LLM_BASE_URL: ${{ inputs.base-url }}
         GREENLIGHT_REPLAY_DIR: ${{ runner.temp }}/greenlight-replay
         GREENLIGHT_REPLAY_INLINE_IMAGES: ${{ inputs.inline-images == 'false' && '0' || '1' }}
 

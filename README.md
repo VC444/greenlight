@@ -16,13 +16,15 @@ of failing you, and when it has nothing useful to say, it says nothing.
 
 ## Steps to run
 
-You need a repo that gets Vercel preview deployments on PRs, and a [Fireworks API
+You need a repo that gets Vercel preview deployments on PRs, and an API key for
+an LLM provider — Anthropic, OpenAI, Google, or any OpenAI-compatible host
+(see [Choosing a model](#choosing-a-model)). The default is a [Fireworks API
 key](https://app.fireworks.ai/settings/users/api-keys). Greenlight runs
 entirely inside your GitHub Actions runner with your keys.
 
 **1. Add the secret.** Repo → Settings → Secrets and variables → Actions:
 
-- `FIREWORKS_API_KEY`: required.
+- `GREENLIGHT_API_KEY` (name it whatever you like): required.
 - `VERCEL_AUTOMATION_BYPASS_SECRET`: only if your preview deployments are
   protected (the default on Vercel Pro/Team). Vercel → Settings → Deployment
   Protection → Protection Bypass for Automation.
@@ -57,8 +59,9 @@ jobs:
     steps:
       - uses: VC444/greenlight@v0.1.1
         with:
-          llm-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+          llm-api-key: ${{ secrets.GREENLIGHT_API_KEY }}
           vercel-bypass-secret: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # model: anthropic/claude-opus-5   # optional; see "Choosing a model"
 ```
 
 **3. Open a pull request.** That's the whole setup.
@@ -91,16 +94,45 @@ The plan comment is Greenlight's contract with you before it runs:
 
 ## Inputs
 
-| Input                   | Required | Description                                                                                                                                                  |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `llm-api-key`           | yes      | Fireworks API key. Drives both plan generation and the browser run.                                                                                          |
-| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                     |
-| `model`                 | no       | Override the model that writes the test plan.                                                                                                                |
-| `executor-model`        | no       | Override the model that drives and judges browser steps. Must stay in the kimi/deepseek/glm families; Stagehand only grammar-enforces its schemas for those. |
-| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.                                 |
-| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                                                         |
+| Input                   | Required | Description                                                                                                                     |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                     |
+| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                        |
+| `model`                 | no       | `provider/model` to run. Defaults to Fireworks-hosted Kimi. See [Choosing a model](#choosing-a-model).                          |
+| `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                              |
+| `base-url`              | no       | Override the built-in endpoint for an OpenAI-compatible provider (e.g. a gateway that fronts it).                               |
+| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.    |
+| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                            |
 
-With the default models a typical PR costs a few cents in Fireworks credits.
+## Choosing a model
+
+`model` takes a `provider/model` string. One key drives both the test plan and
+the browser run.
+
+| Provider                                    | Example                                                       |
+| ------------------------------------------- | ------------------------------------------------------------- |
+| `anthropic`, `openai`, `google`             | `anthropic/claude-opus-5`, `openai/gpt-5`                     |
+| `fireworks` (default), `together`, `openrouter` | `fireworks/accounts/fireworks/models/kimi-k2p7-code`        |
+
+A model id with no provider prefix is read as a Fireworks model, which is what
+`model` meant before providers were selectable — existing configs keep working.
+
+**One constraint, and only on the OpenAI-compatible providers.** The browser
+runner delegates act/extract to Stagehand, which enforces its own JSON schemas
+for the kimi/deepseek/glm families but lets other models behind a generic
+OpenAI-compatible endpoint guess the shape. Greenlight warns when your executor
+model is in that position. The three native providers (`anthropic`, `openai`,
+`google`) go through their own SDK and have no such limit — use
+`executor-model` if you want a native provider driving the browser while a
+cheaper host writes the plan.
+
+Running the server directly instead of the Action? The same settings are env
+vars: `GREENLIGHT_LLM_API_KEY` (or the provider's own — `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `FIREWORKS_API_KEY`, …), `GREENLIGHT_MODEL`,
+`GREENLIGHT_EXECUTOR_MODEL`, `GREENLIGHT_LLM_BASE_URL`.
+
+With the default models a typical PR costs a few cents in Fireworks credits;
+frontier models from the native providers cost meaningfully more.
 
 ## What Greenlight can't judge
 

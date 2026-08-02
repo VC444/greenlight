@@ -28,8 +28,8 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
   let plan: TestPlan | null;
   if (config.useMockPlan) {
     // Deterministic fixture instead of the model — validates the pipeline
-    // (comment → preview → execution) without spending Fireworks credits.
-    console.log(`mock-plan mode: using fixture plan for ${label} (Fireworks disabled)`);
+    // (comment → preview → execution) without spending LLM credits.
+    console.log(`mock-plan mode: using fixture plan for ${label} (no LLM call)`);
     plan = MOCK_PLAN;
   } else {
     console.log(`gathering context for ${label} (${job.action}, head ${job.headSha.slice(0, 7)})`);
