@@ -3,3 +3,5 @@ dist/
 .env
 *.pem
 .DS_Store
+notes/
+greenlight-replay/

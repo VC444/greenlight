@@ -18,7 +18,7 @@ const fireworks = createOpenAICompatible({
 });
 
 const MODEL =
-  process.env.GREENLIGHT_MODEL ?? "accounts/fireworks/models/kimi-k2p7-code";
+  process.env.GREENLIGHT_MODEL || "accounts/fireworks/models/kimi-k2p7-code";
 
 const TestPlanItemSchema = z.object({
   intent: z

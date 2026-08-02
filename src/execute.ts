@@ -4,11 +4,50 @@ import { z } from "zod";
 import type { TestPlan } from "./testplan.js";
 import { withBypass } from "./preview.js";
 import { config } from "./config.js";
+import {
+  drainEvents,
+  isRecording,
+  recorderInitScript,
+  writeReplay,
+  type ItemRecording,
+} from "./recorder.js";
 
 // Plan steps assume a desktop layout (the nav collapses under ~768px); use a
 // comfortable desktop size so responsive UIs render their full-width state.
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 };
 const NAV_TIMEOUT_MS = 30_000;
+
+// GREENLIGHT_DEBUG=1: phase-by-phase timing logs for a browser run, plus
+// Stagehand's own logging, to localize where a run stalls. Off in normal use —
+// the output is far too noisy for CI logs.
+const DEBUG = process.env.GREENLIGHT_DEBUG === "1";
+
+function dbg(message: string): void {
+  if (DEBUG) console.log(`    [debug +${process.uptime().toFixed(1)}s] ${message}`);
+}
+
+/** What the page looks like right now: readyState + image progress. Raced with
+ *  a short timeout so a driver that queues evaluate behind page settling can't
+ *  stall the probe — that timeout itself is the interesting signal. */
+async function pageState(page: StagehandPage): Promise<string> {
+  const probe = page.evaluate<string>(
+    `(() => {
+      const imgs = Array.from(document.images);
+      const pending = imgs.filter((i) => !i.complete).length;
+      return document.readyState + ", " + pending + "/" + imgs.length + " images pending";
+    })()`,
+  );
+  return Promise.race([
+    probe,
+    new Promise<string>((resolve) =>
+      setTimeout(() => resolve("EVALUATE BLOCKED >3s — driver is gating evaluate on page settle"), 3_000).unref(),
+    ),
+  ]);
+}
+// How long after DOM-ready to let images/assets finish before acting, so the
+// session recording captures a fully rendered page. Grace period only — hitting
+// it proceeds with whatever has loaded, it never fails the item.
+const ASSET_SETTLE_MS = 30_000;
 
 // Stagehand's act/extract reasoning runs on OUR Fireworks model, not the
 // Browserbase Model Gateway (disableAPI keeps it all local). We let Stagehand
@@ -27,7 +66,7 @@ const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY ?? "";
 // schemas for kimi/deepseek/glm (others free-guess the shape and fail Zod). Kept
 // separate from the plan model (GREENLIGHT_MODEL) so that setting can't leak here.
 const EXECUTOR_MODEL =
-  process.env.GREENLIGHT_EXECUTOR_MODEL ??
+  process.env.GREENLIGHT_EXECUTOR_MODEL ||
   "accounts/fireworks/models/kimi-k2p7-code";
 
 // A native alert/confirm/prompt over CDP FREEZES the page (Stagehand has no
@@ -135,7 +174,7 @@ export async function runPlan(
   // the only thing that differs between local and remote.
   const modelConfig = {
     disableAPI: true,
-    verbose: 0 as const,
+    verbose: (DEBUG ? 2 : 0) as 0 | 1 | 2,
     disablePino: true,
     model: {
       modelName: `${FIREWORKS_PROVIDER_PREFIX}/${EXECUTOR_MODEL}`,
@@ -149,6 +188,7 @@ export async function runPlan(
         env: "LOCAL",
         localBrowserLaunchOptions: {
           viewport: DESKTOP_VIEWPORT,
+          headless: config.headlessBrowser,
         },
       })
     : new Stagehand({
@@ -165,9 +205,11 @@ export async function runPlan(
   try {
     await stagehand.init();
     const sessionId = stagehand.browserbaseSessionID;
+    // Browserbase hosts the replay; a local run records it itself and ships it
+    // as a workflow artifact, so the run page is where a human goes to find it.
     const replayUrl = sessionId
       ? `https://www.browserbase.com/sessions/${sessionId}`
-      : undefined;
+      : config.actionRunUrl || undefined;
     console.log(
       config.localBrowser
         ? `local browser session (model ${EXECUTOR_MODEL})`
@@ -178,11 +220,23 @@ export async function runPlan(
       stagehand.context.activePage() ?? (await stagehand.context.newPage());
     await page.setViewportSize(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
     await page.addInitScript(DIALOG_SUPPRESS);
+    if (isRecording()) await page.addInitScript(recorderInitScript());
 
     const items: ItemEvidence[] = [];
+    const recordings: ItemRecording[] = [];
     for (const item of plan.items) {
       items.push(await runItem(stagehand, page, previewUrl, item));
+      // Drained per item, not per run: the recorder restarts on every full page
+      // load, so the buffer only ever holds the current document's events.
+      if (isRecording()) {
+        dbg("draining rrweb events");
+        const t = Date.now();
+        const events = await drainEvents(page);
+        dbg(`drained ${events.length} events in ${Date.now() - t}ms`);
+        recordings.push({ intent: item.intent, route: item.route, events });
+      }
     }
+    if (isRecording()) await writeReplay(recordings);
 
     return { sessionId, replayUrl, items };
   } catch (error) {
@@ -219,13 +273,35 @@ async function runItem(
 
   try {
     const target = withBypass(new URL(item.route, previewUrl).toString());
-    await page.goto(target, { waitUntil: "load", timeoutMs: NAV_TIMEOUT_MS });
+    // Two-phase navigation. The hard gate is DOM-ready: act and the judge read
+    // the DOM/a11y tree, so this is all correctness needs — and on a cold
+    // preview (fresh profile, uncached /_next/image optimizations) full "load"
+    // can blow the whole timeout while the DOM has long been usable.
+    dbg(`goto ${target}`);
+    let t = Date.now();
+    await page.goto(target, {
+      waitUntil: "domcontentloaded",
+      timeoutMs: NAV_TIMEOUT_MS,
+    });
+    dbg(`goto done in ${Date.now() - t}ms; page: ${await pageState(page)}`);
+    // Then a bounded, non-fatal grace period for assets to finish, so the
+    // recording shows the page as a user would see it — the replay is what
+    // builds trust in the verdict. A page that never fires "load" costs this
+    // wait and nothing else; visual completeness must never abort an item.
+    t = Date.now();
+    await page.waitForLoadState("load", ASSET_SETTLE_MS).catch(() => {});
+    dbg(`asset settle ended after ${Date.now() - t}ms; page: ${await pageState(page)}`);
 
     // Perform each natural-language step. A step the model can't do (act throws)
     // is an execution problem → uncertain, not a false fail; stop the item there.
-    for (const step of item.steps) {
+    for (const [index, step] of item.steps.entries()) {
+      dbg(`act ${index + 1}/${item.steps.length}: ${step}`);
+      t = Date.now();
       await stagehand.act(step);
+      dbg(`act ${index + 1} done in ${Date.now() - t}ms`);
     }
+    dbg(`judging; page: ${await pageState(page)}`);
+    t = Date.now();
 
     // Judge `expected` against the page via Stagehand's DOM-grounded extract.
     // It sees only the DOM/accessibility tree — not rendered pixels, styling,
@@ -242,6 +318,7 @@ async function runItem(
         `cannot see.`,
       JudgeSchema,
     );
+    dbg(`judge done in ${Date.now() - t}ms`);
     // "cannot_tell" is not a test failure — it's a blind spot of a DOM-only
     // judge. Treat it like an execution gap: uncertain, so callers stay silent
     // (never a wrong red).

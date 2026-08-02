@@ -27,10 +27,30 @@ function loadPrivateKey(path: string): string {
   return pem;
 }
 
+/** Resolves on first access, then remembers. */
+function once<T>(resolve: () => T): () => T {
+  let value: T | undefined;
+  return () => (value ??= resolve());
+}
+
+// The GitHub App credentials are the only settings the Action entry point has no
+// way to supply — it authenticates with the runner's GITHUB_TOKEN instead. They
+// resolve lazily so importing this module never demands them; the App path still
+// fails exactly as before, just at first access rather than at import.
+const appId = once(() => required("APP_ID"));
+const webhookSecret = once(() => required("WEBHOOK_SECRET"));
+const privateKey = once(() => loadPrivateKey(required("PRIVATE_KEY_PATH")));
+
 export const config = {
-  appId: required("APP_ID"),
-  webhookSecret: required("WEBHOOK_SECRET"),
-  privateKey: loadPrivateKey(required("PRIVATE_KEY_PATH")),
+  get appId() {
+    return appId();
+  },
+  get webhookSecret() {
+    return webhookSecret();
+  },
+  get privateKey() {
+    return privateKey();
+  },
   port: Number(process.env.PORT ?? 3000),
   webhookPath: "/api/webhooks",
   // Optional: secret from Vercel "Deployment Protection → Protection Bypass for
@@ -50,6 +70,10 @@ export const config = {
   // (which still drives act/extract). Ideal for iterating for free; prod stays
   // on Browserbase (unset). LLM inference is identical in both modes.
   localBrowser: process.env.GREENLIGHT_LOCAL_BROWSER === "1",
+  // Stagehand launches a headed Chrome by default, which needs a display — fine
+  // on a laptop (and useful: you can watch a plan run), impossible on a CI
+  // runner. Recording is rrweb, i.e. DOM-based, so nothing is lost headless.
+  headlessBrowser: process.env.GREENLIGHT_HEADLESS === "1",
   // Browserbase (Phase 4 execution). Both empty = execution skipped (stay
   // silent, never red). Free tier allows ~3 concurrent sessions.
   browserbaseApiKey: process.env.BROWSERBASE_API_KEY ?? "",
@@ -58,4 +82,28 @@ export const config = {
   // Hard cap on a single browser session's lifetime so a hung run can't burn
   // the whole free-tier budget.
   sessionTimeoutMs: Number(process.env.SESSION_TIMEOUT_MS ?? 900_000),
+  // Where to write the rrweb session replay. Empty = no recording at all, which
+  // is the default everywhere except the Action (where the workflow sets it and
+  // uploads the result as an artifact).
+  replayDir: process.env.GREENLIGHT_REPLAY_DIR ?? "",
+  // Embed images as data URIs instead of referencing them by URL. On by
+  // default: URL-referenced images require the viewer to have access to the
+  // preview (protected previews demand a bypass cookie they won't have), so
+  // the default replay must carry its own pixels to be trustworthy. Costs
+  // artifact size (measured ~50x on an image-heavy page); set to "0" to trade
+  // completeness for small artifacts on public, long-lived previews.
+  replayInlineImages: process.env.GREENLIGHT_REPLAY_INLINE_IMAGES !== "0",
+  // Inside a GitHub Actions run there is no hosted replay to link to — the
+  // recording ships as an artifact on the workflow run, so the run page is the
+  // closest thing to a replay URL.
+  actionRunUrl: actionRunUrl(),
 };
+
+function actionRunUrl(): string {
+  const server = process.env.GITHUB_SERVER_URL;
+  const repository = process.env.GITHUB_REPOSITORY;
+  const runId = process.env.GITHUB_RUN_ID;
+  return server && repository && runId
+    ? `${server}/${repository}/actions/runs/${runId}`
+    : "";
+}

@@ -1,0 +1,38 @@
+# Copy to .github/workflows/greenlight.yml in the repository you want tested.
+#
+# Greenlight comments on the pull request and posts a check run. That check is
+# never red: it reports "success" or "neutral" and nothing else, so adding this
+# workflow can never block a merge.
+
+name: Greenlight
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read # read the diff and changed files
+  pull-requests: write # post the plan and results comments
+  checks: write # post the check run
+  deployments: read # find the PR's preview deployment
+  issues: read # read a linked issue for context
+
+# A new push supersedes the run in flight — no point testing a preview that is
+# already stale, and it keeps concurrent browser sessions to one per PR.
+concurrency:
+  group: greenlight-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  greenlight:
+    runs-on: ubuntu-latest
+    # Forks do not get secrets, so the run could never reach the model.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: <owner>/greenlight@v1
+        with:
+          llm-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+          # Only needed if preview deployments are protected (Vercel Pro/Team
+          # default). Vercel → Settings → Deployment Protection → Protection
+          # Bypass for Automation.
+          vercel-bypass-secret: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}

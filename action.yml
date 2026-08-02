@@ -1,0 +1,102 @@
+name: "Greenlight"
+description: "Infers what a pull request is meant to do, drives its Vercel preview in a browser, and posts what it found."
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  llm-api-key:
+    description: "Fireworks API key. Drives both test-plan generation and the browser run."
+    required: true
+  vercel-bypass-secret:
+    description: >-
+      Vercel "Protection Bypass for Automation" secret. Only needed when preview
+      deployments are protected — which is the default on Vercel Pro/Team.
+    required: false
+    default: ""
+  model:
+    description: "Override the model used to generate the test plan."
+    required: false
+    default: ""
+  executor-model:
+    description: >-
+      Override the model that drives and judges browser steps. Must stay in the
+      kimi/deepseek/glm families — Stagehand only grammar-enforces its schemas
+      for those.
+    required: false
+    default: ""
+  inline-images:
+    description: >-
+      Embed images in the session replay instead of linking them (default), so
+      the replay renders for viewers without preview access and after the
+      preview is torn down. Set to "false" for much smaller artifacts when
+      previews are public and long-lived.
+    required: false
+    default: "true"
+  replay-retention-days:
+    description: "How long to keep the session replay artifact."
+    required: false
+    default: "14"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install Greenlight
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        corepack enable
+        pnpm install --frozen-lockfile
+
+    # Stagehand's local mode launches Chrome through chrome-launcher, which finds
+    # a browser via CHROME_PATH, then `which google-chrome|chromium`, then
+    # .desktop entries — it never looks in Playwright's cache. So: reuse whatever
+    # the runner image already ships, and only download when there is nothing.
+    - name: Resolve a browser
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        CHROME_PATH="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || true)"
+        if [ -z "$CHROME_PATH" ]; then
+          echo "no system Chrome — downloading one"
+          npx playwright install --with-deps chromium
+          CHROME_PATH="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm -u+x | head -1)"
+        fi
+        if [ -z "$CHROME_PATH" ]; then
+          echo "could not resolve a Chrome binary" >&2
+          exit 1
+        fi
+        echo "using $CHROME_PATH"
+        echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+
+    - name: Run Greenlight
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npx tsx src/actionMain.ts
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        # The runner is the browser host — no Browserbase account needed.
+        GREENLIGHT_LOCAL_BROWSER: "1"
+        # No display on a runner; rrweb records the DOM, so nothing is lost.
+        GREENLIGHT_HEADLESS: "1"
+        FIREWORKS_API_KEY: ${{ inputs.llm-api-key }}
+        VERCEL_AUTOMATION_BYPASS_SECRET: ${{ inputs.vercel-bypass-secret }}
+        GREENLIGHT_MODEL: ${{ inputs.model }}
+        GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
+        GREENLIGHT_REPLAY_DIR: ${{ runner.temp }}/greenlight-replay
+        GREENLIGHT_REPLAY_INLINE_IMAGES: ${{ inputs.inline-images == 'false' && '0' || '1' }}
+
+    # One self-contained HTML file: download, open, watch. Uploaded even when the
+    # run logged an error, since a recording of a broken run is the useful part.
+    - name: Upload session replay
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: greenlight-replay-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/greenlight-replay
+        retention-days: ${{ inputs.replay-retention-days }}
+        if-no-files-found: ignore
