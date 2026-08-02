@@ -24,7 +24,10 @@ const require_ = createRequire(import.meta.url);
  * resolve the entry and walk to its sibling instead.
  */
 function distFile(pkg: string, file: string): string {
-  return readFileSync(path.join(path.dirname(require_.resolve(pkg)), file), "utf8");
+  return readFileSync(
+    path.join(path.dirname(require_.resolve(pkg)), file),
+    "utf8",
+  );
 }
 
 /** One plan item's recording. */
@@ -94,9 +97,9 @@ export function recorderInitScript(): string {
 const DRAIN_TIMEOUT_MS = 10_000;
 
 /** Takes the events recorded since the last drain, and clears the buffer. */
-export async function drainEvents(
-  page: { evaluate<R>(expression: string): Promise<R> },
-): Promise<unknown[]> {
+export async function drainEvents(page: {
+  evaluate<R>(expression: string): Promise<R>;
+}): Promise<unknown[]> {
   const timeout = new Promise<"timeout">((resolve) => {
     setTimeout(() => resolve("timeout"), DRAIN_TIMEOUT_MS).unref();
   });
@@ -148,8 +151,7 @@ main { padding: 0 20px 24px; }
 .empty { color: #9aa4b2; padding: 24px 0; }
 </style>
 <header>
-  <h1>Greenlight — session replay</h1>
-  <p>One recording per plan item. Playback re-renders the page's DOM, so text stays sharp and selectable.</p>
+  <h1>Greenlight Session Replay</h1>
 </header>
 <nav id="picker"></nav>
 <main id="stage"></main>
@@ -201,10 +203,14 @@ else stage.innerHTML = '<p class="empty">Nothing was recorded for this run.</p>'
  * inlined — so the artifact opens offline with nothing to install and no
  * network access. Returns the path, or null when there was nothing to write.
  */
-export async function writeReplay(recordings: ItemRecording[]): Promise<string | null> {
+export async function writeReplay(
+  recordings: ItemRecording[],
+): Promise<string | null> {
   const withEvents = recordings.filter((r) => r.events.length > 0);
   if (!withEvents.length) {
-    console.warn("greenlight: no rrweb events were captured — not writing a replay");
+    console.warn(
+      "greenlight: no rrweb events were captured — not writing a replay",
+    );
     return null;
   }
 
@@ -213,7 +219,9 @@ export async function writeReplay(recordings: ItemRecording[]): Promise<string |
     const file = path.join(config.replayDir, "replay.html");
     await writeFile(file, renderPlayer(withEvents), "utf8");
     const events = withEvents.reduce((total, r) => total + r.events.length, 0);
-    console.log(`wrote session replay to ${file} (${withEvents.length} item(s), ${events} events)`);
+    console.log(
+      `wrote session replay to ${file} (${withEvents.length} item(s), ${events} events)`,
+    );
     return file;
   } catch (error) {
     console.warn(
