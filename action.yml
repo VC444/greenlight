@@ -33,6 +33,16 @@ inputs:
       providers (anthropic, openai, google) have no such constraint.
     required: false
     default: ""
+  visual-judge-model:
+    description: >-
+      Model that re-judges an item from a screenshot when the DOM alone can't
+      settle it (a highlight with no aria state, a purely visual change); same
+      "provider/model" syntax. Left unset it uses a model on the provider you
+      already run: `executor-model` on anthropic/openai/google, Kimi K3 on
+      fireworks. On together/openrouter name one here to enable the escalation.
+      Set to "off" to skip it and leave those items inconclusive.
+    required: false
+    default: ""
   base-url:
     description: >-
       Overrides the built-in endpoint for an OpenAI-compatible provider —
@@ -115,6 +125,7 @@ runs:
         VERCEL_AUTOMATION_BYPASS_SECRET: ${{ inputs.vercel-bypass-secret }}
         GREENLIGHT_MODEL: ${{ inputs.model }}
         GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
+        GREENLIGHT_VISUAL_JUDGE_MODEL: ${{ inputs.visual-judge-model }}
         GREENLIGHT_LLM_BASE_URL: ${{ inputs.base-url }}
         GREENLIGHT_REPLAY_DIR: ${{ runner.temp }}/greenlight-replay
         GREENLIGHT_REPLAY_INLINE_IMAGES: ${{ inputs.inline-images == 'false' && '0' || '1' }}

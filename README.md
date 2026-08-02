@@ -100,6 +100,7 @@ The plan comment is Greenlight's contract with you before it runs:
 | `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                        |
 | `model`                 | no       | `provider/model` to run. Defaults to Fireworks-hosted Kimi. See [Choosing a model](#choosing-a-model).                          |
 | `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                              |
+| `visual-judge-model`    | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. `off` disables. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
 | `base-url`              | no       | Override the built-in endpoint for an OpenAI-compatible provider (e.g. a gateway that fronts it).                               |
 | `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.    |
 | `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                            |
@@ -126,10 +127,36 @@ model is in that position. The three native providers (`anthropic`, `openai`,
 `executor-model` if you want a native provider driving the browser while a
 cheaper host writes the plan.
 
-Running the server directly instead of the Action? The same settings are env
-vars: `GREENLIGHT_LLM_API_KEY` (or the provider's own — `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `FIREWORKS_API_KEY`, …), `GREENLIGHT_MODEL`,
-`GREENLIGHT_EXECUTOR_MODEL`, `GREENLIGHT_LLM_BASE_URL`.
+Running Greenlight locally rather than on a runner? The same settings are env
+vars: `GREENLIGHT_LLM_API_KEY`, `GREENLIGHT_MODEL`,
+`GREENLIGHT_EXECUTOR_MODEL`, `GREENLIGHT_VISUAL_JUDGE_MODEL`,
+`GREENLIGHT_LLM_BASE_URL`. One key variable serves every provider — the model
+spec names the provider, so the key never has to.
+
+## Judging what the DOM can't show
+
+Each item's `expected` is judged against the page's DOM and accessibility tree.
+That covers most expectations and keeps verdicts grounded in something checkable
+— but it is blind to anything carried by pixels alone: a highlight with no aria
+or data state, a layout that collapsed, an element that renders offscreen. A
+DOM-only judge that guessed at those would produce false failures, so it is
+allowed to answer "can't tell" instead.
+
+When it does, Greenlight takes a screenshot of the page as the user would see it
+and asks a vision model the same question. Only that second answer decides the
+item, and only when it is confident — if the screenshot doesn't settle it
+either, the item stays inconclusive and nothing is reported as a failure.
+
+The escalation runs only on items the DOM couldn't judge, so a run whose
+expectations are all readable costs nothing extra.
+
+Left unset, it picks a model on the provider you're already using: your
+`executor-model` on `anthropic`, `openai` and `google`, all of which can see,
+and Fireworks-hosted Kimi K3 on `fireworks`, whose default model is text-only.
+It will never reach for a different vendor on its own — one key setting feeds
+every provider, so a cross-provider default would send your key somewhere you
+didn't choose. On `together` and `openrouter`, name a vision model in
+`visual-judge-model` to turn the escalation on; `off` disables it anywhere.
 
 With the default models a typical PR costs a few cents in Fireworks credits;
 frontier models from the native providers cost meaningfully more.

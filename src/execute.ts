@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Stagehand } from "@browserbasehq/stagehand";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import type { TestPlan } from "./testplan.js";
 import { withBypass } from "./preview.js";
@@ -8,7 +9,10 @@ import {
   describe,
   executorModelSpec,
   executorSchemaWarning,
+  languageModel,
   stagehandModelConfig,
+  visualJudgeModelSpec,
+  type ModelSpec,
 } from "./llm.js";
 import {
   drainEvents,
@@ -161,6 +165,9 @@ export async function runPlan(
   }
   const schemaWarning = executorSchemaWarning(spec);
   if (schemaWarning) console.warn(schemaWarning);
+  // Resolved once per run, not per item: an unusable spec should explain itself
+  // a single time, and the escalation is optional either way.
+  const visualJudge = visualJudgeModelSpec(spec);
 
   await acquireSlot();
   // Reason locally on our own model (disableAPI) — never route act/extract
@@ -200,10 +207,13 @@ export async function runPlan(
     const replayUrl = sessionId
       ? `https://www.browserbase.com/sessions/${sessionId}`
       : config.actionRunUrl || undefined;
+    const judgeNote = visualJudge
+      ? `, visual judge ${describe(visualJudge)}`
+      : ", no visual judge";
     console.log(
       config.localBrowser
-        ? `local browser session (model ${describe(spec)})`
-        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"} (model ${describe(spec)})`,
+        ? `local browser session (model ${describe(spec)}${judgeNote})`
+        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"} (model ${describe(spec)}${judgeNote})`,
     );
 
     const page =
@@ -215,7 +225,7 @@ export async function runPlan(
     const items: ItemEvidence[] = [];
     const recordings: ItemRecording[] = [];
     for (const item of plan.items) {
-      items.push(await runItem(stagehand, page, previewUrl, item));
+      items.push(await runItem(stagehand, page, previewUrl, item, visualJudge));
       // Drained per item, not per run: the recorder restarts on every full page
       // load, so the buffer only ever holds the current document's events.
       if (isRecording()) {
@@ -245,11 +255,80 @@ export async function runPlan(
 type StagehandPage = ReturnType<typeof Stagehand.prototype.context.activePage> &
   object;
 
+/**
+ * Second-opinion judge for the DOM judge's blind spot: shows a model the page as
+ * a user sees it. Only ever called after "cannot_tell", so it costs nothing on a
+ * run whose expectations are all readable from the DOM. Returns null on any
+ * failure — an escalation that breaks leaves the original "uncertain" standing,
+ * it never invents a verdict.
+ *
+ * Viewport-sized, not fullPage: a long page shrunk into one image is illegible
+ * to a vision model, and the framing a user would actually see is the honest
+ * basis for a visual judgment. Anything below the fold stays "cannot_tell".
+ */
+async function judgeFromScreenshot(
+  page: StagehandPage,
+  item: TestPlan["items"][number],
+  spec: ModelSpec,
+): Promise<z.infer<typeof JudgeSchema> | null> {
+  try {
+    dbg("capturing screenshot for visual judge");
+    let t = Date.now();
+    const shot = await page.screenshot({ type: "jpeg", quality: 60 });
+    dbg(`screenshot in ${Date.now() - t}ms (${Math.round(shot.byteLength / 1024)}KB)`);
+
+    t = Date.now();
+    const result = await generateText({
+      model: languageModel(spec),
+      output: Output.object({ schema: JudgeSchema }),
+      // A verdict plus one sentence; anything longer is the model rambling.
+      maxOutputTokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                `Determine whether this expectation is satisfied: "${item.expected}".\n` +
+                `The screenshot is the page as a user sees it, captured right after ` +
+                `performing: ${item.steps.join("; ")}.\n` +
+                `A judge reading only the DOM could not decide this, so judge from what ` +
+                `is rendered — layout, color, emphasis, visible text. Answer "pass" if ` +
+                `the outcome is clearly visible, "fail" if the screenshot clearly ` +
+                `contradicts it, and "cannot_tell" if the screenshot doesn't show enough ` +
+                `(it depends on the browser URL, a native dialog, or something below the fold).`,
+            },
+            { type: "file", data: shot, mediaType: "image/jpeg" },
+          ],
+        },
+      ],
+    });
+    dbg(`visual judge done in ${Date.now() - t}ms`);
+    // Same guard as the plan call: on any finish reason but "stop" the SDK never
+    // parsed the output, and touching .output throws with no diagnostics.
+    if (result.finishReason !== "stop") {
+      console.warn(
+        `visual judge stopped early (finishReason: ${result.finishReason}) — keeping the DOM verdict`,
+      );
+      return null;
+    }
+    return result.output;
+  } catch (error) {
+    console.warn(
+      "visual judge failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
 async function runItem(
   stagehand: Stagehand,
   page: StagehandPage,
   previewUrl: string,
   item: TestPlan["items"][number],
+  visualJudge: ModelSpec | null,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
   const onConsole = (m: { type(): string; text(): string }) => {
@@ -260,6 +339,7 @@ async function runItem(
   let error: string | null = null;
   let verdict: ItemEvidence["verdict"] = "uncertain";
   let reasoning = "";
+  let judgedVisually = false;
 
   try {
     const target = withBypass(new URL(item.route, previewUrl).toString());
@@ -310,11 +390,21 @@ async function runItem(
     );
     dbg(`judge done in ${Date.now() - t}ms`);
     // "cannot_tell" is not a test failure — it's a blind spot of a DOM-only
-    // judge. Treat it like an execution gap: uncertain, so callers stay silent
-    // (never a wrong red).
-    verdict =
-      judgment.verdict === "cannot_tell" ? "uncertain" : judgment.verdict;
-    reasoning = judgment.reasoning;
+    // judge. Where a model that can see is configured, ask it before giving up:
+    // the exact cases the DOM judge declines (a visual-only highlight, a state
+    // carried by CSS alone) are the ones a screenshot settles. Only if that also
+    // declines does the item stay uncertain, so callers stay silent rather than
+    // show a wrong red.
+    let final: z.infer<typeof JudgeSchema> = judgment;
+    if (judgment.verdict === "cannot_tell" && visualJudge) {
+      const visual = await judgeFromScreenshot(page, item, visualJudge);
+      if (visual) {
+        final = visual;
+        judgedVisually = true;
+      }
+    }
+    verdict = final.verdict === "cannot_tell" ? "uncertain" : final.verdict;
+    reasoning = final.reasoning;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   } finally {
@@ -325,7 +415,8 @@ async function runItem(
     `  item "${item.intent}" @ ${item.route}: ` +
       (error
         ? `uncertain (execution error: ${error})`
-        : `${verdict}${reasoning ? ` — ${reasoning}` : ""}` +
+        : `${verdict}${judgedVisually ? " (from screenshot)" : ""}` +
+          `${reasoning ? ` — ${reasoning}` : ""}` +
           `${consoleErrors.length ? ` [${consoleErrors.length} console error(s)]` : ""}`),
   );
 

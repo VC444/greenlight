@@ -21,18 +21,9 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
  *  matching ai@5 package under the same prefix, so its act/extract calls get
  *  native structured output too — no schema guessing. */
 const NATIVE = {
-  anthropic: {
-    create: (apiKey: string) => createAnthropic({ apiKey }),
-    keyEnv: ["ANTHROPIC_API_KEY"],
-  },
-  openai: {
-    create: (apiKey: string) => createOpenAI({ apiKey }),
-    keyEnv: ["OPENAI_API_KEY"],
-  },
-  google: {
-    create: (apiKey: string) => createGoogleGenerativeAI({ apiKey }),
-    keyEnv: ["GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY"],
-  },
+  anthropic: { create: (apiKey: string) => createAnthropic({ apiKey }) },
+  openai: { create: (apiKey: string) => createOpenAI({ apiKey }) },
+  google: { create: (apiKey: string) => createGoogleGenerativeAI({ apiKey }) },
 } as const;
 
 /**
@@ -52,19 +43,16 @@ const NATIVE = {
 const COMPATIBLE = {
   fireworks: {
     baseURL: "https://api.fireworks.ai/inference/v1",
-    keyEnv: ["FIREWORKS_API_KEY"],
     structuredOutputs: true,
     stagehand: { prefix: "togetherai", passBaseURL: true },
   },
   together: {
     baseURL: "https://api.together.xyz/v1",
-    keyEnv: ["TOGETHER_API_KEY", "TOGETHER_AI_API_KEY"],
     structuredOutputs: true,
     stagehand: { prefix: "togetherai", passBaseURL: false },
   },
   openrouter: {
     baseURL: "https://openrouter.ai/api/v1",
-    keyEnv: ["OPENROUTER_API_KEY"],
     structuredOutputs: true,
     stagehand: { prefix: "togetherai", passBaseURL: true },
   },
@@ -118,25 +106,6 @@ function parseSpec(raw: string): { provider: Provider; model: string } {
   return { provider: "fireworks", model: raw };
 }
 
-function firstEnv(names: readonly string[]): string {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value) return value;
-  }
-  return "";
-}
-
-/** One key setting wins for every provider, so the Action can keep a single
- *  `llm-api-key` input; provider-native names are honored as a fallback. */
-function resolveKey(provider: Provider): string {
-  const shared = process.env.GREENLIGHT_LLM_API_KEY;
-  if (shared) return shared;
-  const names = isNative(provider)
-    ? NATIVE[provider].keyEnv
-    : COMPATIBLE[provider].keyEnv;
-  return firstEnv(names);
-}
-
 function resolveBaseURL(provider: Provider): string | undefined {
   if (!isCompatible(provider)) return undefined;
   return process.env.GREENLIGHT_LLM_BASE_URL || COMPATIBLE[provider].baseURL;
@@ -154,15 +123,14 @@ export function resolveModel(raw: string, label: string): ModelSpec | null {
     return null;
   }
   const baseURL = resolveBaseURL(provider);
-  const apiKey = resolveKey(provider);
+  // One key setting for every provider: the provider is chosen by the model
+  // spec, so a second, provider-named source could only ever disagree with it —
+  // and the losing side would be a credential silently sent to the wrong host.
+  const apiKey = process.env.GREENLIGHT_LLM_API_KEY ?? "";
   if (!apiKey) {
-    const names = isNative(provider)
-      ? NATIVE[provider].keyEnv
-      : COMPATIBLE[provider].keyEnv;
     console.warn(
       `${label}: no API key for "${provider}" — pass it via the Action's ` +
-        `\`llm-api-key\` input, or set GREENLIGHT_LLM_API_KEY (or ${names.join(" / ")}) ` +
-        `in the environment.`,
+        `\`llm-api-key\` input, or set GREENLIGHT_LLM_API_KEY in the environment.`,
     );
     return null;
   }
@@ -183,6 +151,39 @@ export function planModelSpec(): ModelSpec | null {
 export function executorModelSpec(): ModelSpec | null {
   const raw = process.env.GREENLIGHT_EXECUTOR_MODEL;
   return raw ? resolveModel(raw, "executor model") : planModelSpec();
+}
+
+// The default escalation model for a Fireworks install: vision-capable, and on
+// the same key and host as the default plan model. Only ever reached for a
+// Fireworks executor — see below.
+const FIREWORKS_VISION_MODEL = "fireworks/accounts/fireworks/models/kimi-k3";
+
+/**
+ * The model that re-judges an item from a screenshot when the DOM couldn't
+ * settle it. Null disables the escalation, leaving those items "uncertain".
+ *
+ * Left unset, this only ever picks a model on the provider already in use:
+ * the executor itself where it can see (every native provider can), and the
+ * Fireworks vision model for a Fireworks executor, since that provider's
+ * default is a text-only coding model. It must never reach for some other
+ * vendor's endpoint on its own — one key setting feeds every provider here, so
+ * a cross-provider default would send the user's key to a host they never
+ * chose. Any other provider gets the escalation only by asking for it.
+ */
+export function visualJudgeModelSpec(executor: ModelSpec): ModelSpec | null {
+  const raw = (process.env.GREENLIGHT_VISUAL_JUDGE_MODEL ?? "").trim();
+  if (raw === "off") return null;
+  if (raw) return resolveModel(raw, "visual judge model");
+  if (isNative(executor.provider)) return executor;
+  if (executor.provider === "fireworks") {
+    return resolveModel(FIREWORKS_VISION_MODEL, "visual judge model");
+  }
+  console.log(
+    `no visual judge: "${executor.provider}" has no default vision model. Set ` +
+      `GREENLIGHT_VISUAL_JUDGE_MODEL to one that can see (any provider) to have ` +
+      `screenshots settle expectations the DOM can't.`,
+  );
+  return null;
 }
 
 /** An ai@7 model for our own generateText call. */
