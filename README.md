@@ -114,8 +114,9 @@ you name.
 | `together`   | [docs.together.ai](https://docs.together.ai/docs/serverless-models)                     |
 | `openrouter` | [openrouter.ai/models](https://openrouter.ai/models)                                    |
 
-A model id with no provider prefix is read as a Fireworks model, which is what
-`model` meant before providers were selectable — existing configs keep working.
+The prefix is required. An id without one is rejected rather than guessed at:
+your key is only good for one provider, and Greenlight will not pick which host
+receives it.
 
 Examples, as the line reads in the workflow's `with:` block:
 
