@@ -86,24 +86,22 @@ export interface ModelSpec {
   baseURL?: string;
 }
 
-// Kept as the default so existing installs keep working untouched: this is the
-// model the prompts and the executor's schema handling were tuned against.
-const DEFAULT_SPEC = "fireworks/accounts/fireworks/models/kimi-k3";
-
 /**
  * Splits "provider/model" on the FIRST slash only — model ids routinely contain
  * slashes ("accounts/fireworks/models/kimi-k3", "moonshotai/kimi-k3").
- * A spec whose first segment isn't a known provider is treated as a bare
- * Fireworks model id, which is what GREENLIGHT_MODEL meant before providers
- * were selectable.
+ *
+ * The prefix is required, and no provider is ever assumed: one key setting
+ * feeds every provider here, so guessing the host would mean posting the user's
+ * key somewhere they never named. Returns null for anything else, and the
+ * caller says so rather than running.
  */
-function parseSpec(raw: string): { provider: Provider; model: string } {
+function parseSpec(raw: string): { provider: Provider; model: string } | null {
   const slash = raw.indexOf("/");
-  if (slash > 0) {
-    const head = raw.slice(0, slash);
-    if (isProvider(head)) return { provider: head, model: raw.slice(slash + 1) };
-  }
-  return { provider: "fireworks", model: raw };
+  if (slash <= 0) return null;
+  const head = raw.slice(0, slash);
+  if (!isProvider(head)) return null;
+  const model = raw.slice(slash + 1);
+  return model ? { provider: head, model } : null;
 }
 
 function resolveBaseURL(provider: Provider): string | undefined {
@@ -116,11 +114,16 @@ function resolveBaseURL(provider: Provider): string | undefined {
  * silent rather than fail the run.
  */
 export function resolveModel(raw: string, label: string): ModelSpec | null {
-  const { provider, model } = parseSpec(raw.trim());
-  if (!model) {
-    console.warn(`${label}: no model in "${raw}" — expected "provider/model".`);
+  const parsed = parseSpec(raw.trim());
+  if (!parsed) {
+    console.warn(
+      `${label}: "${raw}" is not a "provider/model" spec. Prefix the model id ` +
+        `with the provider that serves it (${PROVIDERS.join(", ")}), e.g. ` +
+        `"anthropic/<model-id>".`,
+    );
     return null;
   }
+  const { provider, model } = parsed;
   const baseURL = resolveBaseURL(provider);
   // One key setting for every provider: the provider is chosen by the model
   // spec, so a second, provider-named source could only ever disagree with it —
@@ -136,12 +139,20 @@ export function resolveModel(raw: string, label: string): ModelSpec | null {
   return { provider, model, apiKey, baseURL };
 }
 
-/** The model that turns PR context into a test plan. */
+/** The model that turns PR context into a test plan. There is no default: the
+ *  one key we hold belongs to whichever provider is named here, so a built-in
+ *  choice would pick a vendor (and a bill) on the user's behalf. */
 export function planModelSpec(): ModelSpec | null {
-  return resolveModel(
-    process.env.GREENLIGHT_MODEL || DEFAULT_SPEC,
-    "test plan model",
-  );
+  const raw = (process.env.GREENLIGHT_MODEL ?? "").trim();
+  if (!raw) {
+    console.warn(
+      `test plan model: GREENLIGHT_MODEL is unset. Name the model to run as ` +
+        `"provider/model" (${PROVIDERS.join(", ")}); the API key you supply ` +
+        `must belong to the provider you name.`,
+    );
+    return null;
+  }
+  return resolveModel(raw, "test plan model");
 }
 
 /** The model that drives and judges browser steps. Falls back to the plan
@@ -152,10 +163,9 @@ export function executorModelSpec(): ModelSpec | null {
   return raw ? resolveModel(raw, "executor model") : planModelSpec();
 }
 
-// The default escalation model for a Fireworks install: vision-capable, and on
-// the same key and host as the default plan model (it *is* DEFAULT_SPEC, but
-// named separately because this one is chosen for its eyes, not its coding).
-// Only ever reached for a Fireworks executor — see below.
+// The escalation model for a Fireworks executor: vision-capable, and on the
+// key and host the user already chose by naming `fireworks` themselves. Only
+// ever reached for a Fireworks executor — see below.
 const FIREWORKS_VISION_MODEL = "fireworks/accounts/fireworks/models/kimi-k3";
 
 export interface VisualJudge {
