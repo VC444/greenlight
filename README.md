@@ -1,6 +1,6 @@
 # Greenlight
 
-Greenlight tests your pull requests without asking anyone to write tests. On
+Greenlight tests your teammate's pull requests without asking anyone to write tests. On
 every PR it reads the diff, works out what the change is _for_, drives the
 Vercel preview deployment in a real browser to check it, and reports what it
 found: a plan comment, a results comment, a check run, and a downloadable
