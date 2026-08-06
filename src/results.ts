@@ -155,7 +155,7 @@ function renderResultsComment(
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
   lines.push(
     "",
-    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · a ❌ is a finding to look at, not a merge blocker · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page)</sub>`,
+    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page)</sub>`,
   );
   return lines.join("\n");
 }
