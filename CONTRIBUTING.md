@@ -111,9 +111,8 @@ npx tsx src/actionMain.ts
 
 `GITHUB_TOKEN` is already exported, so it doesn't need repeating here.
 
-- `GREENLIGHT_LOCAL_BROWSER=1` runs Chrome on your machine instead of opening a
-  Browserbase session — free, and no Browserbase credentials required. Inference
-  is identical either way.
+- `GREENLIGHT_LOCAL_BROWSER=1` runs the browser on your machine. It's required:
+  without it execution is skipped and the run stops after the test plan.
 - `GREENLIGHT_HEADLESS` stays unset, so Chrome is headed and you can watch the
   run. The Action sets it because a runner has no display.
 - `GREENLIGHT_DEBUG=1` adds phase-by-phase timing, which is how you localize a
@@ -130,7 +129,7 @@ here wins while your keys still come from the file.
 ```
 posted plan comment on owner/repo#12            ← or "updated"
 preview for owner/repo#12 ready at https://…    ← the head-SHA lookup worked
-local browser session (model <provider>/<model>, visual judge <provider>/<model>)
+browser session (model <provider>/<model>, visual judge <provider>/<model>)
   item "…" @ /: pass — …
 wrote session replay to ./greenlight-replay/replay.html (2 item(s), N events)
 posted results comment on owner/repo#12

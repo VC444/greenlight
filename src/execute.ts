@@ -60,10 +60,11 @@ async function pageState(page: StagehandPage): Promise<string> {
 // it proceeds with whatever has loaded, it never fails the item.
 const ASSET_SETTLE_MS = 30_000;
 
-// Stagehand's act/extract reasoning runs on OUR model, not the Browserbase
-// Model Gateway (disableAPI keeps it all local). Which model that is comes from
-// src/llm.ts, the same resolution the test plan uses; see stagehandModelConfig
-// for why Stagehand gets coordinates rather than a model instance.
+// Stagehand's act/extract reasoning runs on OUR model, never through Stagehand's
+// own hosted inference API (disableAPI keeps it all local). Which model that is
+// comes from src/llm.ts, the same resolution the test plan uses; see
+// stagehandModelConfig for why Stagehand gets coordinates rather than a model
+// instance.
 
 // A native alert/confirm/prompt over CDP FREEZES the page (Stagehand has no
 // built-in dialog dismissal), which would deadlock act/extract until the session
@@ -109,14 +110,13 @@ export interface ItemEvidence {
 }
 
 export interface ExecutionResult {
-  sessionId: string | undefined;
   replayUrl: string | undefined;
   items: ItemEvidence[];
 }
 
-// In-process cap on concurrent Browserbase sessions. The free tier allows only
-// a few at once; the while-loop re-checks after each wake so slots are never
-// double-granted.
+// In-process cap on concurrent browser sessions. Each one is a real Chrome, so
+// this bounds memory when several PRs are in flight; the while-loop re-checks
+// after each wake so slots are never double-granted.
 let activeSessions = 0;
 const slotWaiters: Array<() => void> = [];
 
@@ -133,24 +133,21 @@ function releaseSlot(): void {
 }
 
 /** True when everything execution needs is configured: the LLM that drives +
- *  judges the steps, plus a browser. Local mode needs no Browserbase
- *  credentials; remote mode needs both the API key and project id. */
+ *  judges the steps, plus a browser to run them in. */
 export function canExecute(): boolean {
-  if (!executorModelSpec()) return false;
-  if (config.localBrowser) return true;
-  return Boolean(config.browserbaseApiKey && config.browserbaseProjectId);
+  return Boolean(executorModelSpec()) && config.localBrowser;
 }
 
 /**
- * Drives the PR's preview through the plan in a browser (a Browserbase cloud
- * session, or a local Chrome when config.localBrowser is set), acting on
- * natural-language steps with an LLM judge for each item's `expected`. Returns
- * per-item verdicts + evidence and the session replay URL, or null when
- * execution can't run at all (callers stay silent).
+ * Drives the PR's preview through the plan in a Chrome on this machine, acting
+ * on natural-language steps with an LLM judge for each item's `expected`.
+ * Returns per-item verdicts + evidence and where to find the replay, or null
+ * when execution can't run at all (callers stay silent).
  *
- * Cloud sessions are opened late (only once we have a ready preview) and
- * lifetime-capped by browserbaseSessionCreateParams.timeout. Local runs have no
- * session id and therefore no replay URL.
+ * The browser is launched late, only once we have a ready preview, and closed
+ * in the finally below. Note there is no cap on a session's total lifetime: a
+ * wedged run is bounded only by the per-navigation timeout above and by
+ * whatever the surrounding CI job allows.
  */
 export async function runPlan(
   previewUrl: string,
@@ -159,8 +156,8 @@ export async function runPlan(
   const spec = executorModelSpec();
   if (!spec || !canExecute()) {
     console.warn(
-      "execution not configured (needs an LLM API key plus either " +
-        "GREENLIGHT_LOCAL_BROWSER=1 or BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID) — skipping",
+      "execution not configured (needs an LLM API key plus " +
+        "GREENLIGHT_LOCAL_BROWSER=1); skipping",
     );
     return null;
   }
@@ -171,52 +168,32 @@ export async function runPlan(
   const visualJudge = visualJudgeModelSpec(spec);
 
   await acquireSlot();
-  // Reason locally on our own model (disableAPI) — never route act/extract
-  // through Browserbase's server-side API / Model Gateway. Browser location is
-  // the only thing that differs between local and remote.
-  const modelConfig = {
+  // Reason on our own model (disableAPI), never through Stagehand's hosted
+  // inference. The browser is always local: on the Action that means a Chrome
+  // on the runner itself, which is what makes the free path free.
+  const stagehand = new Stagehand({
     disableAPI: true,
     verbose: (DEBUG ? 2 : 0) as 0 | 1 | 2,
     disablePino: true,
     model: stagehandModelConfig(spec),
-  };
-  const stagehand = config.localBrowser
-    ? new Stagehand({
-        ...modelConfig,
-        env: "LOCAL",
-        localBrowserLaunchOptions: {
-          viewport: DESKTOP_VIEWPORT,
-          headless: config.headlessBrowser,
-        },
-      })
-    : new Stagehand({
-        ...modelConfig,
-        env: "BROWSERBASE",
-        apiKey: config.browserbaseApiKey,
-        projectId: config.browserbaseProjectId,
-        browserbaseSessionCreateParams: {
-          projectId: config.browserbaseProjectId,
-          timeout: Math.floor(config.sessionTimeoutMs / 1000), // seconds
-        },
-      });
+    env: "LOCAL",
+    localBrowserLaunchOptions: {
+      viewport: DESKTOP_VIEWPORT,
+      headless: config.headlessBrowser,
+    },
+  });
 
   try {
     await stagehand.init();
-    const sessionId = stagehand.browserbaseSessionID;
-    // Browserbase hosts the replay; a local run records it itself and ships it
-    // as a workflow artifact, so the run page is where a human goes to find it.
-    const replayUrl = sessionId
-      ? `https://www.browserbase.com/sessions/${sessionId}`
-      : config.actionRunUrl || undefined;
+    // Nothing hosts a replay for us: the run records itself (rrweb) and ships
+    // the result as a workflow artifact, so the run page is where a human goes
+    // to find it. Outside Actions there is no URL to point at at all.
+    const replayUrl = config.actionRunUrl || undefined;
     const judgeNote = visualJudge
       ? `, visual judge ${describe(visualJudge.spec)}` +
         (visualJudge.trusted ? "" : " (unverified: cannot fail an item)")
       : ", no visual judge";
-    console.log(
-      config.localBrowser
-        ? `local browser session (model ${describe(spec)}${judgeNote})`
-        : `browserbase session ${sessionId ?? "?"} — replay ${replayUrl ?? "n/a"} (model ${describe(spec)}${judgeNote})`,
-    );
+    console.log(`browser session (model ${describe(spec)}${judgeNote})`);
 
     const page =
       stagehand.context.activePage() ?? (await stagehand.context.newPage());
@@ -240,7 +217,7 @@ export async function runPlan(
     }
     if (isRecording()) await writeReplay(recordings);
 
-    return { sessionId, replayUrl, items };
+    return { replayUrl, items };
   } catch (error) {
     // Session-level failure (init/connect) — stay silent, never red.
     console.error(

@@ -64,24 +64,19 @@ export const config = {
   // from src/mockPlan.ts instead, so preview access + browser automation can be
   // validated deterministically without spending credits. Off = real model.
   useMockPlan: process.env.GREENLIGHT_MOCK_PLAN === "1",
-  // Testing switch: run the browser locally (Stagehand env "LOCAL", a Chrome on
-  // this machine) instead of opening a Browserbase cloud session. No Browserbase
-  // credits are spent and no API key/project id is required — only the LLM key
-  // (which still drives act/extract). Ideal for iterating for free; prod stays
-  // on Browserbase (unset). LLM inference is identical in both modes.
+  // Run the browser on this machine (Stagehand env "LOCAL"). This is how every
+  // shipped path runs: the Action sets it on the runner, and a local run needs
+  // it too. Unset, execution is skipped entirely (see canExecute in
+  // src/execute.ts). The only thing it changes is where the browser lives; the
+  // LLM key still drives act/extract either way.
   localBrowser: process.env.GREENLIGHT_LOCAL_BROWSER === "1",
   // Stagehand launches a headed Chrome by default, which needs a display — fine
   // on a laptop (and useful: you can watch a plan run), impossible on a CI
   // runner. Recording is rrweb, i.e. DOM-based, so nothing is lost headless.
   headlessBrowser: process.env.GREENLIGHT_HEADLESS === "1",
-  // Browserbase (Phase 4 execution). Both empty = execution skipped (stay
-  // silent, never red). Free tier allows ~3 concurrent sessions.
-  browserbaseApiKey: process.env.BROWSERBASE_API_KEY ?? "",
-  browserbaseProjectId: process.env.BROWSERBASE_PROJECT_ID ?? "",
+  // Cap on browser sessions running at once in one process, which matters when
+  // several PRs are in flight: each session is a real Chrome.
   maxConcurrentSessions: Number(process.env.MAX_CONCURRENT_SESSIONS ?? 3),
-  // Hard cap on a single browser session's lifetime so a hung run can't burn
-  // the whole free-tier budget.
-  sessionTimeoutMs: Number(process.env.SESSION_TIMEOUT_MS ?? 900_000),
   // Where to write the rrweb session replay. Empty = no recording at all, which
   // is the default everywhere except the Action (where the workflow sets it and
   // uploads the result as an artifact).

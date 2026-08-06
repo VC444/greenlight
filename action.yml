@@ -122,7 +122,8 @@ runs:
       run: npx tsx src/actionMain.ts
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        # The runner is the browser host — no Browserbase account needed.
+        # The runner is the browser host: Chrome runs on the runner itself, so
+        # the Action needs no browser service or account of its own.
         GREENLIGHT_LOCAL_BROWSER: "1"
         # No display on a runner; rrweb records the DOM, so nothing is lost.
         GREENLIGHT_HEADLESS: "1"
