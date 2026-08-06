@@ -47,7 +47,7 @@ in your shell.
 | Variable | Needed | Notes |
 | --- | --- | --- |
 | `GREENLIGHT_LLM_API_KEY` | yes | The key, whichever provider you run. `GREENLIGHT_MODEL` picks the provider; this is its key. There is deliberately no `ANTHROPIC_API_KEY`-style alternative — a second source could only ever disagree with the selected provider, and the losing side would be a credential sent to the wrong host. Without a key `canExecute()` is false and the browser never opens. |
-| `GREENLIGHT_MODEL` | no | `provider/model` — `anthropic/claude-opus-5`, `openai/gpt-5`, `google/gemini-3-flash`, `fireworks/…`, `together/…`, `openrouter/…`. Unset uses the default. `GREENLIGHT_EXECUTOR_MODEL` and `GREENLIGHT_VISUAL_JUDGE_MODEL` override the browser-driving and screenshot Judges independently. |
+| `GREENLIGHT_MODEL` | no | `provider/model`, where provider is `anthropic`, `openai`, `google` (native SDKs) or `fireworks`, `together`, `openrouter` (OpenAI-compatible) and the model id is whatever that provider calls it. Unset uses the default in `src/llm.ts`. `GREENLIGHT_EXECUTOR_MODEL` and `GREENLIGHT_VISUAL_JUDGE_MODEL` override the browser-driving and screenshot Judges independently. |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | if previews are protected | The default on Vercel Pro/Team. Vercel → Settings → Deployment Protection → Protection Bypass for Automation. |
 
 Anything else `.env.example` lists is optional — leave it blank and the defaults

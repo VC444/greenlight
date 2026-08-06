@@ -88,11 +88,11 @@ export interface ModelSpec {
 
 // Kept as the default so existing installs keep working untouched: this is the
 // model the prompts and the executor's schema handling were tuned against.
-const DEFAULT_SPEC = "fireworks/accounts/fireworks/models/kimi-k2p7-code";
+const DEFAULT_SPEC = "fireworks/accounts/fireworks/models/kimi-k3";
 
 /**
  * Splits "provider/model" on the FIRST slash only — model ids routinely contain
- * slashes ("accounts/fireworks/models/kimi-k2p7-code", "moonshotai/kimi-k2").
+ * slashes ("accounts/fireworks/models/kimi-k3", "moonshotai/kimi-k3").
  * A spec whose first segment isn't a known provider is treated as a bare
  * Fireworks model id, which is what GREENLIGHT_MODEL meant before providers
  * were selectable.
@@ -107,8 +107,7 @@ function parseSpec(raw: string): { provider: Provider; model: string } {
 }
 
 function resolveBaseURL(provider: Provider): string | undefined {
-  if (!isCompatible(provider)) return undefined;
-  return process.env.GREENLIGHT_LLM_BASE_URL || COMPATIBLE[provider].baseURL;
+  return isCompatible(provider) ? COMPATIBLE[provider].baseURL : undefined;
 }
 
 /**
@@ -154,36 +153,61 @@ export function executorModelSpec(): ModelSpec | null {
 }
 
 // The default escalation model for a Fireworks install: vision-capable, and on
-// the same key and host as the default plan model. Only ever reached for a
-// Fireworks executor — see below.
+// the same key and host as the default plan model (it *is* DEFAULT_SPEC, but
+// named separately because this one is chosen for its eyes, not its coding).
+// Only ever reached for a Fireworks executor — see below.
 const FIREWORKS_VISION_MODEL = "fireworks/accounts/fireworks/models/kimi-k3";
+
+export interface VisualJudge {
+  spec: ModelSpec;
+  /**
+   * Whether a "fail" from this judge is allowed to stand. False for a model we
+   * defaulted to without knowing it can see: a host that quietly drops the
+   * image part instead of erroring leaves the model answering from the prompt
+   * alone, and a confident wrong "fail" is the one outcome this pipeline must
+   * never produce. Such a judge can still resolve an item to "pass"; its "fail"
+   * is downgraded back to uncertain.
+   */
+  trusted: boolean;
+}
 
 /**
  * The model that re-judges an item from a screenshot when the DOM couldn't
  * settle it. Null disables the escalation, leaving those items "uncertain".
  *
- * Left unset, this only ever picks a model on the provider already in use:
- * the executor itself where it can see (every native provider can), and the
- * Fireworks vision model for a Fireworks executor, since that provider's
- * default is a text-only coding model. It must never reach for some other
- * vendor's endpoint on its own — one key setting feeds every provider here, so
- * a cross-provider default would send the user's key to a host they never
- * chose. Any other provider gets the escalation only by asking for it.
+ * Left unset, this only ever picks a model on the provider already in use: the
+ * executor itself, or the Fireworks vision model for a Fireworks executor,
+ * whose model may well be a text-only coding one. It must never reach for some
+ * other vendor's endpoint on its own — one key setting feeds every provider
+ * here, so a cross-provider default would send the user's key to a host they
+ * never chose.
+ *
+ * On the OpenAI-compatible hosts the executor is whatever id the user typed, so
+ * we can't know it has eyes the way we can for a native provider. Escalating to
+ * it anyway beats the alternative of never judging visually there at all: a
+ * failed call already leaves the item uncertain, exactly where it started. What
+ * we don't do is let that unverified judge fail an item — see `trusted`.
  */
-export function visualJudgeModelSpec(executor: ModelSpec): ModelSpec | null {
+export function visualJudgeModelSpec(executor: ModelSpec): VisualJudge | null {
   const raw = (process.env.GREENLIGHT_VISUAL_JUDGE_MODEL ?? "").trim();
   if (raw === "off") return null;
-  if (raw) return resolveModel(raw, "visual judge model");
-  if (isNative(executor.provider)) return executor;
+  // Named explicitly: the user vouched for it, so its verdicts are final.
+  if (raw) {
+    const spec = resolveModel(raw, "visual judge model");
+    return spec ? { spec, trusted: true } : null;
+  }
+  if (isNative(executor.provider)) return { spec: executor, trusted: true };
   if (executor.provider === "fireworks") {
-    return resolveModel(FIREWORKS_VISION_MODEL, "visual judge model");
+    const spec = resolveModel(FIREWORKS_VISION_MODEL, "visual judge model");
+    return spec ? { spec, trusted: true } : null;
   }
   console.log(
-    `no visual judge: "${executor.provider}" has no default vision model. Set ` +
-      `GREENLIGHT_VISUAL_JUDGE_MODEL to one that can see (any provider) to have ` +
-      `screenshots settle expectations the DOM can't.`,
+    `visual judge: no known vision model on "${executor.provider}", falling back ` +
+      `to the executor (${executor.model}). It can resolve an item but not fail ` +
+      `one. Name a vision model in GREENLIGHT_VISUAL_JUDGE_MODEL for a judge ` +
+      `with the final word, or "off" to skip the escalation.`,
   );
-  return null;
+  return { spec: executor, trusted: false };
 }
 
 /** An ai@7 model for our own generateText call. */

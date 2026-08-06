@@ -13,6 +13,7 @@ import {
   stagehandModelConfig,
   visualJudgeModelSpec,
   type ModelSpec,
+  type VisualJudge,
 } from "./llm.js";
 import {
   drainEvents,
@@ -208,7 +209,8 @@ export async function runPlan(
       ? `https://www.browserbase.com/sessions/${sessionId}`
       : config.actionRunUrl || undefined;
     const judgeNote = visualJudge
-      ? `, visual judge ${describe(visualJudge)}`
+      ? `, visual judge ${describe(visualJudge.spec)}` +
+        (visualJudge.trusted ? "" : " (unverified: cannot fail an item)")
       : ", no visual judge";
     console.log(
       config.localBrowser
@@ -328,7 +330,7 @@ async function runItem(
   page: StagehandPage,
   previewUrl: string,
   item: TestPlan["items"][number],
-  visualJudge: ModelSpec | null,
+  visualJudge: VisualJudge | null,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
   const onConsole = (m: { type(): string; text(): string }) => {
@@ -397,8 +399,19 @@ async function runItem(
     // show a wrong red.
     let final: z.infer<typeof JudgeSchema> = judgment;
     if (judgment.verdict === "cannot_tell" && visualJudge) {
-      const visual = await judgeFromScreenshot(page, item, visualJudge);
-      if (visual) {
+      const visual = await judgeFromScreenshot(page, item, visualJudge.spec);
+      // A judge we defaulted to on an OpenAI-compatible host may never have seen
+      // the screenshot at all (some hosts drop the image part rather than
+      // erroring), so its "fail" is not evidence of anything. Keep the useful
+      // half — a "pass" it could only reach by looking — and leave the rest
+      // uncertain, which is where the item stood anyway.
+      if (visual && !visualJudge.trusted && visual.verdict === "fail") {
+        console.warn(
+          `visual judge failed "${item.intent}" but is unverified — leaving it ` +
+            `uncertain. Name a vision model in GREENLIGHT_VISUAL_JUDGE_MODEL to ` +
+            `let it fail items.`,
+        );
+      } else if (visual) {
         final = visual;
         judgedVisually = true;
       }
