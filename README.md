@@ -18,13 +18,11 @@ of failing you, and when it has nothing useful to say, it says nothing.
 
 You need a repo that gets Vercel preview deployments on PRs, and an API key for
 an LLM provider — Anthropic, OpenAI, Google, or any OpenAI-compatible host
-(see [Choosing a model](#choosing-a-model)). You name the model explicitly;
-there is no default. Greenlight runs entirely
-inside your GitHub Actions runner with your keys.
+(see [Choosing a model](#choosing-a-model)). Greenlight runs entirely inside your GitHub Actions runner with your keys.
 
 **1. Add the secret.** Repo → Settings → Secrets and variables → Actions:
 
-- `GREENLIGHT_API_KEY` (name it whatever you like): required.
+- `GREENLIGHT_API_KEY`: required.
 - `VERCEL_AUTOMATION_BYPASS_SECRET`: only if your preview deployments are
   protected (the default on Vercel Pro/Team). Vercel → Settings → Deployment
   Protection → Protection Bypass for Automation.
@@ -62,7 +60,7 @@ jobs:
           llm-api-key: ${{ secrets.GREENLIGHT_API_KEY }}
           vercel-bypass-secret: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           # required; see "Choosing a model"
-          model: anthropic/claude-opus-5
+          model: <provider>/<model-id>
 ```
 
 **3. Open a pull request.** That's the whole setup.
@@ -95,16 +93,13 @@ The plan comment is Greenlight's contract with you before it runs:
 
 ## Inputs
 
-| Input                   | Required | Description                                                                                                                                                              |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                                              |
-| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                                 |
-| `model`                 | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                                               |
-| `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                                       |
-| `visual-judge-model`    | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. `off` disables. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
-| `base-url`              | no       | Override the built-in endpoint for an OpenAI-compatible provider (e.g. a gateway that fronts it).                                                                        |
-| `inline-images`         | no       | Embed images in the replay (default `true`) so it renders after the preview is torn down. Set `false` for smaller artifacts.                                             |
-| `replay-retention-days` | no       | How long to keep the replay artifact (default `14`).                                                                                                                     |
+| Input                  | Required | Description                                                                                                                                              |
+| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm-api-key`          | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                              |
+| `model`                | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                               |
+| `vercel-bypass-secret` | no       | Vercel protection-bypass secret, for protected previews.                                                                                                 |
+| `executor-model`       | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                       |
+| `visual-judge-model`   | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
 
 ## Choosing a model
 
@@ -112,61 +107,55 @@ The plan comment is Greenlight's contract with you before it runs:
 test plan and the browser run, so the key you pass must belong to the provider
 you name.
 
-| Provider                              | Example                                       |
-| ------------------------------------- | --------------------------------------------- |
-| `fireworks`, `together`, `openrouter` | `fireworks/accounts/fireworks/models/kimi-k3` |
-| `anthropic`, `openai`, `google`       | `anthropic/claude-opus-5`, `openai/gpt-5`     |
+| Provider     | Where the ids are listed                                                                |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `anthropic`  | [platform.claude.com](https://platform.claude.com/docs/en/about-claude/models/overview) |
+| `openai`     | [developers.openai.com](https://developers.openai.com/api/docs/models)                  |
+| `google`     | [ai.google.dev](https://ai.google.dev/gemini-api/docs/models)                           |
+| `fireworks`  | [fireworks.ai/models](https://fireworks.ai/models)                                      |
+| `together`   | [docs.together.ai](https://docs.together.ai/docs/serverless-models)                     |
+| `openrouter` | [openrouter.ai/models](https://openrouter.ai/models)                                    |
 
 A model id with no provider prefix is read as a Fireworks model, which is what
 `model` meant before providers were selectable — existing configs keep working.
 
-**One constraint, and only on the OpenAI-compatible providers.** The browser
-runner delegates act/extract to Stagehand, which enforces its own JSON schemas
-for the kimi/deepseek/glm families but lets other models behind a generic
-OpenAI-compatible endpoint guess the shape. Greenlight warns when your executor
-model is in that position. The three native providers (`anthropic`, `openai`,
-`google`) go through their own SDK and have no such limit — use
-`executor-model` if you want a native provider driving the browser while a
-cheaper host writes the plan.
+Examples, as the line reads in the workflow's `with:` block:
 
-Running Greenlight locally rather than on a runner? The same settings are env
-vars: `GREENLIGHT_LLM_API_KEY`, `GREENLIGHT_MODEL`,
-`GREENLIGHT_EXECUTOR_MODEL`, `GREENLIGHT_VISUAL_JUDGE_MODEL`,
-`GREENLIGHT_LLM_BASE_URL`. One key variable serves every provider — the model
-spec names the provider, so the key never has to.
+- `model: openai/gpt-5.6-sol`
+- `model: anthropic/claude-opus-5`
+- `model: fireworks/accounts/fireworks/models/kimi-k3`
+
+Those are ids that existed when this was written, not recommendations.
+
+**One constraint, on the OpenAI-compatible hosts only.** For the browser run,
+`fireworks`, `together`, and `openrouter` are reliable with the `kimi`,
+`deepseek`, and `glm` families; other models there can emit malformed steps that
+show up as inconclusive items. Greenlight warns at startup when your executor
+model is in that position. The native providers (`anthropic`, `openai`,
+`google`) have no such limit.
 
 ## Judging what the DOM can't show
 
-Each item's `expected` is judged against the page's DOM and accessibility tree.
-That covers most expectations and keeps verdicts grounded in something checkable
-— but it is blind to anything carried by pixels alone: a highlight with no aria
-or data state, a layout that collapsed, an element that renders offscreen. A
-DOM-only judge that guessed at those would produce false failures, so it is
-allowed to answer "can't tell" instead.
+Each item's `expected` is judged against the page's DOM and accessibility tree,
+which is blind to anything carried by pixels alone. Rather than guess, that
+judge can answer "can't tell". When it does, Greenlight screenshots the viewport
+and puts the same question to a vision model, and that answer decides the item.
+If the screenshot doesn't settle it either, the item stays ❔ Inconclusive, never
+a failure. Nothing else triggers the escalation, so a run whose expectations are
+all readable costs nothing extra.
 
-When it does, Greenlight takes a screenshot of the page as the user would see it
-and asks a vision model the same question. Only that second answer decides the
-item, and only when it is confident — if the screenshot doesn't settle it
-either, the item stays inconclusive and nothing is reported as a failure.
-
-The escalation runs only on items the DOM couldn't judge, so a run whose
-expectations are all readable costs nothing extra.
-
-Left unset, it picks a model on the provider you're already using: your
-`executor-model` on `anthropic`, `openai` and `google`, all of which can see,
-and Fireworks-hosted Kimi K3 on `fireworks`, whose usual models are text-only.
-It will never reach for a different vendor on its own — one key setting feeds
-every provider, so a cross-provider default would send your key somewhere you
-didn't choose. On `together` and `openrouter`, name a vision model in
-`visual-judge-model` to turn the escalation on; `off` disables it anywhere.
+The judge defaults to a model on the provider you already run and never another
+vendor. On `together` and `openrouter` it can pass an item but not fail one,
+since those hosts serve arbitrary model ids that may not accept an image; name a
+vision model in `visual-judge-model` to lift that, or `off` to skip it.
 
 ## Limits worth knowing
 
 - **No native browser dialogs.** `alert()`/`confirm()` are suppressed to keep
   the session alive; expectations about them can't be checked.
-- **With the visual judge off, visual expectations can't be judged.** That's the
-  case when `visual-judge-model: off`, or when it's unset on `together` and
-  `openrouter`.
+- **With the visual judge off (`visual-judge-model: "off"`), visual expectations
+  can't be judged.** Nor can they be _failed_ on `together` and `openrouter`
+  unless you name the judge yourself.
 - **Anything it can't establish comes back ❔ Inconclusive**: expected, honest,
   and never a red check. If a run breaks midway, that item is Inconclusive too,
   not a failure.
