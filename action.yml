@@ -10,12 +10,6 @@ inputs:
       API key for the LLM provider named in `model`. Drives both test-plan
       generation and the browser run.
     required: true
-  vercel-bypass-secret:
-    description: >-
-      Vercel "Protection Bypass for Automation" secret. Only needed when preview
-      deployments are protected — which is the default on Vercel Pro/Team.
-    required: false
-    default: ""
   model:
     description: >-
       Model to run, as "provider/model" — the reference setup is
@@ -25,6 +19,12 @@ inputs:
       ("together/…", "openrouter/…"). No default: the run fails unless you
       name one.
     required: true
+  vercel-bypass-secret:
+    description: >-
+      Vercel "Protection Bypass for Automation" secret. Only needed when preview
+      deployments are protected — which is the default on Vercel Pro/Team.
+    required: false
+    default: ""
   executor-model:
     description: >-
       Override the model that drives and judges browser steps; same
