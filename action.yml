@@ -62,6 +62,15 @@ inputs:
       Set to "off" to skip the escalation and leave those items inconclusive.
     required: false
     default: ""
+  pause-timeout-minutes:
+    description: >-
+      How long the run waits when someone unchecks the "Run these checks" box on
+      the plan comment, before giving up and ending quietly. The run is the only
+      thing still listening for that box, so it stays alive to see it come back
+      — which costs runner minutes, but only when a human actually paused it. A
+      normal run never waits here at all.
+    required: false
+    default: "30"
 
 runs:
   using: composite
@@ -132,6 +141,7 @@ runs:
         GREENLIGHT_MODEL: ${{ inputs.model }}
         GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
         GREENLIGHT_VISUAL_JUDGE_MODEL: ${{ inputs.visual-judge-model }}
+        GREENLIGHT_PAUSE_TIMEOUT_MS: ${{ fromJSON(inputs.pause-timeout-minutes) * 60000 }}
         GREENLIGHT_REPLAY_DIR: ${{ runner.temp }}/greenlight-replay
         # Replay images stay inlined (the config default): a replay that links
         # to a protected or torn-down preview renders blank for exactly the

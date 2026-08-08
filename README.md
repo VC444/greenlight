@@ -82,12 +82,26 @@ silent rather than posting noise.
 
 ## Steering the plan
 
-The plan comment is Greenlight's contract with you before it runs:
+The plan comment is Greenlight's contract with you before it runs, and it is
+editable. By default nothing is required of you: the run box is checked, so as
+soon as the preview is ready Greenlight goes.
 
-- **React 👎 to the plan comment** and the next push regenerates it from
-  scratch.
-- **Delete the comment** and the next push starts fresh.
-- Your edits to the comment are never overwritten by later pushes.
+- **Uncheck "Run these checks"** to pause. Greenlight holds, says so on the PR,
+  and waits for you to check it again — then runs the plan *as the comment
+  stands*, including anything you changed while it waited.
+- **Uncheck an item** to skip just that one.
+- **Edit the wording** of a step, a route, or an expectation and Greenlight
+  runs what you wrote. Nothing is required to be in our phrasing; write the
+  steps the way you'd tell a person.
+- **Delete the comment** to call the run off entirely.
+
+Every edit applies to the commit the plan was written for. Push again and
+Greenlight writes a fresh plan for the new code, with the box checked again,
+because a plan for the previous commit isn't an answer about this one.
+
+If you never check the box back on, the run gives up quietly after 30 minutes
+(`pause-timeout-minutes`) rather than holding a runner open. Checking it after
+that won't reach the finished run; push again to start over.
 
 ## Inputs
 
@@ -98,6 +112,7 @@ The plan comment is Greenlight's contract with you before it runs:
 | `vercel-bypass-secret` | no       | Vercel protection-bypass secret, for protected previews.                                                                                                 |
 | `executor-model`       | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                       |
 | `visual-judge-model`   | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
+| `pause-timeout-minutes` | no      | How long a run waits when you uncheck the run box, before giving up. Default 30. Only spends runner minutes when someone actually pauses.                |
 
 ## Choosing a model
 

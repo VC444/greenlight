@@ -78,41 +78,76 @@ function replayLine(result: ExecutionResult): string {
     : "";
 }
 
-/**
- * Posts a completed check run for this push. Returns its html_url (to link from
- * the comment) or null when the check can't be created — most likely the App is
- * missing "Checks: Read & write", which we surface as a fix-it rather than a red.
- */
-async function postCheckRun(
+/** Our check run for this SHA, if one is already there to update. */
+async function findCheckRun(
   octokit: Octokit,
   job: PullRequestJob,
-  plan: TestPlan,
-  result: ExecutionResult,
+): Promise<number | null> {
+  const { data } = await octokit.request(
+    "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+    {
+      owner: job.owner,
+      repo: job.repo,
+      ref: job.headSha,
+      check_name: CHECK_NAME,
+      per_page: 100,
+    },
+  );
+  return data.check_runs[0]?.id ?? null;
+}
+
+interface CheckContent {
+  conclusion: "success" | "neutral";
+  title: string;
+  summary: string;
+  text?: string;
+}
+
+/**
+ * Creates our check run for this push, or updates the one already there.
+ *
+ * Upsert rather than post, because a single run can report twice: it says
+ * "paused" while a human holds the gate open, then replaces that with the
+ * verdicts once they let it go. Two check runs of the same name on one commit
+ * would leave the stale one visible next to the real answer.
+ *
+ * Returns its html_url (to link from the comment), or null when the check can't
+ * be written — most likely a missing "Checks: Read & write", which we surface as
+ * a fix-it rather than a red.
+ */
+async function upsertCheckRun(
+  octokit: Octokit,
+  job: PullRequestJob,
+  content: CheckContent,
 ): Promise<string | null> {
   const label = `${job.owner}/${job.repo}#${job.prNumber}`;
-  const t = tally(result.items);
-  const summary = `${plan.summary}\n\n**${headline(t)}** across ${t.total} check(s).${replayLine(result)}`;
+  const shared = {
+    owner: job.owner,
+    repo: job.repo,
+    status: "completed" as const,
+    conclusion: content.conclusion,
+    completed_at: new Date().toISOString(),
+    output: {
+      title: content.title,
+      summary: content.summary,
+      ...(content.text ? { text: content.text } : {}),
+    },
+  };
 
   try {
-    const { data } = await octokit.request(
-      "POST /repos/{owner}/{repo}/check-runs",
-      {
-        owner: job.owner,
-        repo: job.repo,
-        name: CHECK_NAME,
-        head_sha: job.headSha,
-        status: "completed",
-        conclusion: conclusion(t),
-        completed_at: new Date().toISOString(),
-        output: {
-          title: headline(t),
-          summary,
-          text: renderItems(result.items),
-        },
-      },
-    );
+    const existingId = await findCheckRun(octokit, job);
+    const { data } = existingId
+      ? await octokit.request(
+          "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
+          { ...shared, check_run_id: existingId },
+        )
+      : await octokit.request("POST /repos/{owner}/{repo}/check-runs", {
+          ...shared,
+          name: CHECK_NAME,
+          head_sha: job.headSha,
+        });
     console.log(
-      `posted check run for ${label}: ${conclusion(t)} (${headline(t)})`,
+      `${existingId ? "updated" : "posted"} check run for ${label}: ${content.conclusion} (${content.title})`,
     );
     return data.html_url ?? null;
   } catch (error) {
@@ -122,8 +157,8 @@ async function postCheckRun(
       (error as { status?: number }).status === 403
     ) {
       console.warn(
-        `check run for ${label} forbidden — the GitHub App needs "Checks: Read & write". ` +
-          `Grant it in the App's repository permissions and accept the update. Posting the results comment only.`,
+        `check run for ${label} forbidden — the workflow needs "checks: write" ` +
+          `(a GitHub App needs "Checks: Read & write"). Continuing without it.`,
       );
       return null;
     }
@@ -134,6 +169,27 @@ async function postCheckRun(
     );
     return null;
   }
+}
+
+/**
+ * Says on the PR that a human unchecked the run box and we are holding.
+ *
+ * Neutral, like everything else Greenlight posts, so a paused run can never
+ * gate a merge. It exists because the alternative is a workflow that idles with
+ * no visible reason, which reads as broken to everyone who didn't click the box.
+ */
+export async function reportPaused(
+  octokit: Octokit,
+  job: PullRequestJob,
+): Promise<void> {
+  await upsertCheckRun(octokit, job, {
+    conclusion: "neutral",
+    title: "Paused — waiting for you",
+    summary:
+      "The run checkbox on the plan comment is unchecked, so nothing is running.\n\n" +
+      "Edit the plan however you like, then check the box to run it. " +
+      "Pushing a new commit also starts over with a fresh plan.",
+  });
 }
 
 function renderResultsComment(
@@ -229,6 +285,12 @@ export async function reportResults(
   plan: TestPlan,
   result: ExecutionResult,
 ): Promise<void> {
-  const checkUrl = await postCheckRun(octokit, job, plan, result);
+  const t = tally(result.items);
+  const checkUrl = await upsertCheckRun(octokit, job, {
+    conclusion: conclusion(t),
+    title: headline(t),
+    summary: `${plan.summary}\n\n**${headline(t)}** across ${t.total} check(s).${replayLine(result)}`,
+    text: renderItems(result.items),
+  });
   await upsertResultsComment(octokit, job, plan, result, checkUrl);
 }

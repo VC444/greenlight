@@ -60,6 +60,13 @@ export const config = {
   // How long to wait for a Vercel preview to build before giving up (staying
   // silent, never red). Vercel Next.js previews are typically well under this.
   previewTimeoutMs: Number(process.env.PREVIEW_TIMEOUT_MS ?? 300_000),
+  // Unchecking the run box on the plan comment pauses execution, and the run
+  // stays alive polling for it to come back. This caps that idle wait: the box
+  // buys thinking time, not an open-ended hold on a CI runner. Reaching the cap
+  // ends the run quietly; pushing again, or checking the box before it expires,
+  // starts a fresh one.
+  pauseTimeoutMs: Number(process.env.GREENLIGHT_PAUSE_TIMEOUT_MS ?? 1_800_000),
+  pausePollMs: Number(process.env.GREENLIGHT_PAUSE_POLL_MS ?? 15_000),
   // Testing switch: when set, skip the test-plan LLM call and drive the pipeline
   // from src/mockPlan.ts instead, so preview access + browser automation can be
   // validated deterministically without spending credits. Off = real model.
