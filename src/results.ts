@@ -211,7 +211,7 @@ function renderResultsComment(
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
   lines.push(
     "",
-    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page)</sub>`,
+    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ❌ and ❔ never fail the check run: Greenlight reports, it doesn't gate the merge</sub>`,
   );
   return lines.join("\n");
 }

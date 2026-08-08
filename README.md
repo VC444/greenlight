@@ -1,8 +1,6 @@
 # Greenlight
 
-Greenlight is a GitHub Action that turns your teammate's PR into a test plan
-and runs it in a real browser against the preview deployment. It reports what
-held up and what didn't, with a recording of the session.
+Greenlight is a GitHub Action that turns your teammate's PR into a test plan and runs it in a real browser. It reports what worked and what didn't, with a recording of the entire session.
 
 It is built for **Next.js apps deployed on Vercel**. Other setups are out of
 scope for now.
@@ -87,8 +85,8 @@ editable. By default nothing is required of you: the run box is checked, so as
 soon as the preview is ready Greenlight goes.
 
 - **Uncheck "Run these checks"** to pause. Greenlight holds, says so on the PR,
-  and waits for you to check it again — then runs the plan *as the comment
-  stands*, including anything you changed while it waited.
+  and waits for you to check it again — then runs the plan _as the comment
+  stands_, including anything you changed while it waited.
 - **Uncheck an item** to skip just that one.
 - **Edit the wording** of a step, a route, or an expectation and Greenlight
   runs what you wrote. Nothing is required to be in our phrasing; write the
@@ -105,14 +103,14 @@ that won't reach the finished run; push again to start over.
 
 ## Inputs
 
-| Input                  | Required | Description                                                                                                                                              |
-| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm-api-key`          | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                              |
-| `model`                | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                               |
-| `vercel-bypass-secret` | no       | Vercel protection-bypass secret, for protected previews.                                                                                                 |
-| `executor-model`       | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                       |
-| `visual-judge-model`   | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
-| `pause-timeout-minutes` | no      | How long a run waits when you uncheck the run box, before giving up. Default 30. Only spends runner minutes when someone actually pauses.                |
+| Input                   | Required | Description                                                                                                                                              |
+| ----------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                              |
+| `model`                 | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                               |
+| `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                 |
+| `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                       |
+| `visual-judge-model`    | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |
+| `pause-timeout-minutes` | no       | How long a run waits when you uncheck the run box, before giving up. Default 30. Only spends runner minutes when someone actually pauses.                |
 
 ## Choosing a model
 
