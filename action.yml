@@ -83,6 +83,7 @@ runs:
       env:
         LLM_API_KEY: ${{ inputs.llm-api-key }}
         MODEL: ${{ inputs.model }}
+        PAUSE_MINUTES: ${{ inputs.pause-timeout-minutes }}
       run: |
         if [ -z "$LLM_API_KEY" ]; then
           echo "::error::llm-api-key is empty. Add your LLM provider's API key to the repository's Actions secrets and pass it to this step via the llm-api-key input. (Note: repository secrets are not available to workflows triggered from forks.)"
@@ -92,6 +93,14 @@ runs:
           echo "::error::model is empty. Name the model to run as \"provider/model\", where provider is one of anthropic, openai, google, fireworks, together, openrouter. There is no default; the key you supply must belong to the provider you name."
           exit 1
         fi
+        # Workflow expressions have no arithmetic, so the minutes-to-ms
+        # conversion happens here — which means validating the input first,
+        # rather than letting bash choke on it.
+        if ! printf '%s' "$PAUSE_MINUTES" | grep -Eq '^[0-9]+$'; then
+          echo "::error::pause-timeout-minutes must be a whole number of minutes (got \"$PAUSE_MINUTES\")."
+          exit 1
+        fi
+        echo "GREENLIGHT_PAUSE_TIMEOUT_MS=$((PAUSE_MINUTES * 60000))" >> "$GITHUB_ENV"
 
     - uses: actions/setup-node@v4
       with:
@@ -141,7 +150,7 @@ runs:
         GREENLIGHT_MODEL: ${{ inputs.model }}
         GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
         GREENLIGHT_VISUAL_JUDGE_MODEL: ${{ inputs.visual-judge-model }}
-        GREENLIGHT_PAUSE_TIMEOUT_MS: ${{ fromJSON(inputs.pause-timeout-minutes) * 60000 }}
+        # GREENLIGHT_PAUSE_TIMEOUT_MS is exported by the verify step above.
         GREENLIGHT_REPLAY_DIR: ${{ runner.temp }}/greenlight-replay
         # Replay images stay inlined (the config default): a replay that links
         # to a protected or torn-down preview renders blank for exactly the
