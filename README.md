@@ -54,7 +54,7 @@ jobs:
     # Forks do not get secrets, so the run could never reach the model.
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: VC444/greenlight@v0.2.0
+      - uses: VC444/greenlight@v1.0.0
         with:
           llm-api-key: ${{ secrets.GREENLIGHT_API_KEY }}
           vercel-bypass-secret: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
