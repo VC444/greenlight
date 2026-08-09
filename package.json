@@ -1,6 +1,6 @@
 {
   "name": "greenlight",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Github Action that infers what a PR is meant to do and tests its Vercel preview in a real browser",
   "type": "module",
