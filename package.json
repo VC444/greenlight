@@ -1,6 +1,6 @@
 {
   "name": "greenlight",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Github Action that infers what a PR is meant to do and tests its Vercel preview in a real browser",
   "type": "module",
@@ -8,7 +8,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "smee": "node --env-file=.env scripts/smee.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preversion": "pnpm typecheck",
+    "version": "node scripts/pin-readme-version.mjs && git add README.md",
+    "postversion": "git push --follow-tags"
   },
   "packageManager": "pnpm@10.1.0",
   "pnpm": {
