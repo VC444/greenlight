@@ -16,18 +16,17 @@ of failing you, and when it has nothing useful to say, it says nothing.
 
 ## Steps to run
 
-You need a repo that gets Vercel preview deployments on PRs, and an API key for
-an LLM provider — Anthropic, OpenAI, Google, or any OpenAI-compatible host
-(see [Choosing a model](#choosing-a-model)). Greenlight runs entirely inside your GitHub Actions runner with your keys.
+**1. Go to your repo** that has Vercel preview deployments enabled.
 
-**1. Add the secret.** Repo → Settings → Secrets and variables → Actions:
+**2. Add the secrets.** Repo → Settings → Secrets and variables → Actions:
 
-- `GREENLIGHT_API_KEY`: required.
+- `GREENLIGHT_API_KEY`: required. This will be your LLM provider key (see
+  [Choosing a model](#choosing-a-model)).
 - `VERCEL_AUTOMATION_BYPASS_SECRET`: only if your preview deployments are
   protected (the default on Vercel Pro/Team). Vercel → Settings → Deployment
   Protection → Protection Bypass for Automation.
 
-**2. Copy the workflow** to `.github/workflows/greenlight.yml`:
+**3. Copy this workflow** to `.github/workflows/greenlight.yml` and put the `model` param of your choice:
 
 ```yaml
 name: Greenlight
@@ -63,7 +62,7 @@ jobs:
           model: <provider>/<model-id>
 ```
 
-**3. Open a pull request.** That's the whole setup.
+**4. Open a pull request.** That's the whole setup.
 
 ## What a run looks like
 
