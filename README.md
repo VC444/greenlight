@@ -10,7 +10,7 @@ scope for now.
 merge. When a run can't establish something, it says Inconclusive (❔) instead
 of failing you, and when it has nothing useful to say, it says nothing.
 
-▶️ **[Watch the demo](https://www.youtube.com/watch?v=Av5Zy-Phg-0)** (YouTube)
+Demo: https://www.youtube.com/watch?v=Av5Zy-Phg-0
 
 <img width="2557" height="1345" alt="Greenlight PR Comment" src="https://github.com/user-attachments/assets/337e5e0a-4b46-42b2-9efc-8014b0d0ba82" />
 
