@@ -12,7 +12,7 @@ of failing you, and when it has nothing useful to say, it says nothing.
 
 Demo : https://www.youtube.com/watch?v=Av5Zy-Phg-0
 
-See it work live: https://cal.com/vignesh-cal/greenlight-demo
+Book a call: https://cal.com/vignesh-cal/greenlight-demo
 
 <img width="2557" height="1345" alt="Greenlight PR Comment" src="https://github.com/user-attachments/assets/337e5e0a-4b46-42b2-9efc-8014b0d0ba82" />
 
