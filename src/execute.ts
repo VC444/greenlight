@@ -260,8 +260,12 @@ async function judgeFromScreenshot(
     const result = await generateText({
       model: languageModel(spec),
       output: Output.object({ schema: JudgeSchema }),
-      // A verdict plus one sentence; anything longer is the model rambling.
-      maxOutputTokens: 500,
+      // A verdict plus one sentence is ~60 tokens; the rest is headroom for a
+      // reasoning model, which bills its thinking to this budget and can spend
+      // several hundred tokens on it before answering. Too tight a cap here is
+      // invisible: the judge just returns null and every escalation stays
+      // uncertain.
+      maxOutputTokens: 2000,
       messages: [
         {
           role: "user",

@@ -20,7 +20,7 @@ const TestPlanItemSchema = z.object({
       "Concrete browser actions for ONE continuous journey, run in order in the " +
         "same tab with no page reload between them (state carries over, exactly " +
         "like a real user). Move between pages by clicking UI elements, not by " +
-        'starting over. e.g. "Type \'test@example.com\' into the email field".',
+        "starting over. e.g. \"Type 'test@example.com' into the email field\".",
     ),
   expected: z.string().describe("The observable outcome that means PASS"),
 });
@@ -50,7 +50,7 @@ Rules:
 - Steps must be concrete and self-contained: "Type 'test@example.com' into the email field", not "test the form". Assume the tester has never seen this app.
 - Do not emit steps that merely open the route or wait for the page to load — the runner already navigates to \`route\` and waits before your first step. Begin steps at the first real interaction or observation.
 - Never emit steps that resize the window or set the browser viewport/screen size — the runner already opens a desktop-width (1280px) viewport, so the desktop navigation is always visible. Write steps as if that has already happened.
-- Prefer 1-3 high-confidence items over many speculative ones. A wrong FAIL is far worse than a missed test.
+- Prefer 1-5 high-confidence items over many speculative ones. A wrong FAIL is far worse than a missed test.
 - If the PR body/title are empty or uninformative, infer intent from the diff alone and set confidence to "low".
 - If the change has no user-visible browser-testable surface (pure refactor, CI config, docs, dependency bumps), return an empty items array and say why in the summary.`;
 
@@ -132,6 +132,8 @@ function salvagePlan(raw: string | undefined): TestPlan | null {
 // in the prompt either way.
 const SCHEMA_NOTE = `\n\nRespond with a single JSON object matching this JSON schema:\n${JSON.stringify(z.toJSONSchema(TestPlanSchema))}`;
 
+const MAX_OUTPUT_TOKENS = 32000;
+
 export async function generateTestPlan(
   ctx: PrContext,
 ): Promise<TestPlan | null> {
@@ -150,9 +152,7 @@ export async function generateTestPlan(
         output: Output.object({ schema: TestPlanSchema }),
         system: SYSTEM_PROMPT + SCHEMA_NOTE,
         prompt: renderContext(ctx),
-        // Cost guard only; a truncated response is caught by the finishReason
-        // check below. Plans are well under this in practice.
-        maxOutputTokens: 4000,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
       });
       // The SDK only parses structured output when the model finished cleanly;
       // on any other finish reason (hit the token cap, content filter, …) the
@@ -167,6 +167,21 @@ export async function generateTestPlan(
           `test plan attempt ${attempt}/${MAX_ATTEMPTS}: model stopped early ` +
             `(finishReason: ${result.finishReason}, output tokens: ${result.usage.outputTokens}, ${result.response.modelId})`,
         );
+        // Say where the budget went. A reasoning model spends most of it
+        // thinking and can hit the cap with no answer text at all, which reads
+        // like a dead model unless the thinking is accounted for beside it.
+        // Measured in characters, not tokens: hosts that return the reasoning
+        // as a separate field still report it as 0 reasoning tokens.
+        if (result.finishReason === "length") {
+          const thought = result.reasoningText?.length ?? 0;
+          console.warn(
+            `  hit the ${MAX_OUTPUT_TOKENS}-token output cap after ` +
+              `${thought} chars of reasoning and ${result.text.length} of answer. ` +
+              (result.text
+                ? `Answer ended: ...${result.text.slice(-120)}`
+                : `It never started the answer. Raise MAX_OUTPUT_TOKENS or use a model that thinks less.`),
+          );
+        }
         continue;
       }
       return result.output;
