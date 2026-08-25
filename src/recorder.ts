@@ -12,8 +12,8 @@ import { config } from "./config.js";
  * it viable as a CI artifact — and the replay re-renders the same DOM the judge
  * ruled on rather than showing pixels the judge never saw.
  *
- * Recording is off unless GREENLIGHT_REPLAY_DIR is set, so the App path and
- * local runs are unaffected until they ask for it.
+ * Recording is off unless GREENLIGHT_REPLAY_DIR is set, so a local run is
+ * unaffected until it asks for one.
  */
 
 const require_ = createRequire(import.meta.url);

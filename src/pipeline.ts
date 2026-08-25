@@ -1,5 +1,5 @@
-import type { getInstallationOctokit } from "./github.js";
-import type { PullRequestJob } from "./queue.js";
+import type { Octokit } from "@octokit/core";
+import type { PullRequestJob } from "./job.js";
 import { gatherPrContext } from "./context.js";
 import { generateTestPlan, type TestPlan } from "./testplan.js";
 import {
@@ -12,8 +12,6 @@ import { runPlan } from "./execute.js";
 import { reportResults, reportPaused } from "./results.js";
 import { config } from "./config.js";
 import { MOCK_PLAN } from "./mockPlan.js";
-
-type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,12 +87,11 @@ function logPreviewProblem(preview: PreviewResult, label: string): void {
  * The whole run for one pull request event: context → plan → comment → preview
  * → execution → results.
  *
- * It takes an authenticated client rather than building one, because how that
- * client was obtained is the only thing that differs between the two entry
- * points — the App resolves an installation token, the Action uses the runner's
- * GITHUB_TOKEN. Keep it that way: nothing below this line should learn which
- * one it is running under, or the Action stops working in ways the App never
- * reveals.
+ * It takes an authenticated client rather than building one, because that is
+ * the one thing an entry point has to supply for itself: the Action hands it
+ * the runner's GITHUB_TOKEN, and a hosted always-on receiver would resolve an
+ * installation token instead. Keep it that way: nothing below this line should
+ * learn how it was authenticated.
  */
 export async function processJob(octokit: Octokit, job: PullRequestJob): Promise<void> {
   const label = `${job.owner}/${job.repo}#${job.prNumber}`;
