@@ -1,8 +1,6 @@
-import type { getInstallationOctokit } from "./github.js";
-import type { PullRequestJob } from "./queue.js";
+import type { Octokit } from "@octokit/core";
+import type { PullRequestJob } from "./job.js";
 import type { TestPlan } from "./testplan.js";
-
-type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
 // The plan comment is the live state for exactly one head SHA, and the marker
 // says which. Every push regenerates the plan and overwrites this comment

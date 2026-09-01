@@ -1,9 +1,7 @@
-import type { getInstallationOctokit } from "./github.js";
-import type { PullRequestJob } from "./queue.js";
+import type { Octokit } from "@octokit/core";
+import type { PullRequestJob } from "./job.js";
 import type { TestPlan } from "./testplan.js";
 import type { ExecutionResult, ItemEvidence } from "./execute.js";
-
-type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
 const CHECK_NAME = "Greenlight";
 
@@ -158,7 +156,7 @@ async function upsertCheckRun(
     ) {
       console.warn(
         `check run for ${label} forbidden — the workflow needs "checks: write" ` +
-          `(a GitHub App needs "Checks: Read & write"). Continuing without it.`,
+          `in its permissions block. Continuing without it.`,
       );
       return null;
     }

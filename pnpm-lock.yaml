@@ -23,24 +23,15 @@ importers:
       '@browserbasehq/stagehand':
         specifier: ^3.7.0
         version: 3.7.0(playwright-core@1.61.1)(zod@4.4.3)
-      '@octokit/app':
-        specifier: ^16.1.2
-        version: 16.1.2
       '@octokit/core':
         specifier: ^7.0.6
         version: 7.0.6
-      '@octokit/webhooks':
-        specifier: ^14.2.0
-        version: 14.2.0
       ai:
         specifier: ^7.0.29
         version: 7.0.29(zod@4.4.3)
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1
       playwright-core:
         specifier: ^1.61.1
         version: 1.61.1
@@ -50,16 +41,10 @@ importers:
       rrweb-player:
         specifier: ^2.1.1
         version: 2.1.1
-      smee-client:
-        specifier: ^5.0.0
-        version: 5.0.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@types/express':
-        specifier: ^5.0.6
-        version: 5.0.6
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -431,32 +416,8 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
-  '@octokit/app@16.1.2':
-    resolution: {integrity: sha512-8j7sEpUYVj18dxvh0KWj6W/l6uAiVRBl1JBDVRqH1VHKAO/G5eRVl4yEoYACjakWers1DjUkcCHyJNQK47JqyQ==}
-    engines: {node: '>= 20'}
-
-  '@octokit/auth-app@8.2.0':
-    resolution: {integrity: sha512-vVjdtQQwomrZ4V46B9LaCsxsySxGoHsyw6IYBov/TqJVROrlYdyNgw5q6tQbB7KZt53v1l1W53RiqTvpzL907g==}
-    engines: {node: '>= 20'}
-
-  '@octokit/auth-oauth-app@9.0.3':
-    resolution: {integrity: sha512-+yoFQquaF8OxJSxTb7rnytBIC2ZLbLqA/yb71I4ZXT9+Slw4TziV9j/kyGhUFRRTF2+7WlnIWsePZCWHs+OGjg==}
-    engines: {node: '>= 20'}
-
-  '@octokit/auth-oauth-device@8.0.3':
-    resolution: {integrity: sha512-zh2W0mKKMh/VWZhSqlaCzY7qFyrgd9oTWmTmHaXnHNeQRCZr/CXy2jCgHo4e4dJVTiuxP5dLa0YM5p5QVhJHbw==}
-    engines: {node: '>= 20'}
-
-  '@octokit/auth-oauth-user@6.0.2':
-    resolution: {integrity: sha512-qLoPPc6E6GJoz3XeDG/pnDhJpTkODTGG4kY0/Py154i/I003O9NazkrwJwRuzgCalhzyIeWQ+6MDvkUmKXjg/A==}
-    engines: {node: '>= 20'}
-
   '@octokit/auth-token@6.0.0':
     resolution: {integrity: sha512-P4YJBPdPSpWTQ1NU4XYdvHvXJJDxM6YwpS0FZHRgP7YFkdVxsWcpWGy/NVqlAA7PcPCnMacXlRm1y2PFZRWL/w==}
-    engines: {node: '>= 20'}
-
-  '@octokit/auth-unauthenticated@7.0.3':
-    resolution: {integrity: sha512-8Jb1mtUdmBHL7lGmop9mU9ArMRUTRhg8vp0T1VtZ4yd9vEm3zcLwmjQkhNEduKawOOORie61xhtYIhTDN+ZQ3g==}
     engines: {node: '>= 20'}
 
   '@octokit/core@7.0.6':
@@ -471,29 +432,8 @@ packages:
     resolution: {integrity: sha512-grAEuupr/C1rALFnXTv6ZQhFuL1D8G5y8CN04RgrO4FIPMrtm+mcZzFG7dcBm+nq+1ppNixu+Jd78aeJOYxlGA==}
     engines: {node: '>= 20'}
 
-  '@octokit/oauth-app@8.0.3':
-    resolution: {integrity: sha512-jnAjvTsPepyUaMu9e69hYBuozEPgYqP4Z3UnpmvoIzHDpf8EXDGvTY1l1jK0RsZ194oRd+k6Hm13oRU8EoDFwg==}
-    engines: {node: '>= 20'}
-
-  '@octokit/oauth-authorization-url@8.0.0':
-    resolution: {integrity: sha512-7QoLPRh/ssEA/HuHBHdVdSgF8xNLz/Bc5m9fZkArJE5bb6NmVkDm3anKxXPmN1zh6b5WKZPRr3697xKT/yM3qQ==}
-    engines: {node: '>= 20'}
-
-  '@octokit/oauth-methods@6.0.2':
-    resolution: {integrity: sha512-HiNOO3MqLxlt5Da5bZbLV8Zarnphi4y9XehrbaFMkcoJ+FL7sMxH/UlUsCVxpddVu4qvNDrBdaTVE2o4ITK8ng==}
-    engines: {node: '>= 20'}
-
   '@octokit/openapi-types@27.0.0':
     resolution: {integrity: sha512-whrdktVs1h6gtR+09+QsNk2+FO+49j6ga1c55YZudfEG+oKJVvJLQi3zkOm5JjiUXAagWK2tI2kTGKJ2Ys7MGA==}
-
-  '@octokit/openapi-webhooks-types@12.1.0':
-    resolution: {integrity: sha512-WiuzhOsiOvb7W3Pvmhf8d2C6qaLHXrWiLBP4nJ/4kydu+wpagV5Fkz9RfQwV2afYzv3PB+3xYgp4mAdNGjDprA==}
-
-  '@octokit/plugin-paginate-rest@14.0.0':
-    resolution: {integrity: sha512-fNVRE7ufJiAA3XUrha2omTA39M6IXIc6GIZLvlbsm8QOQCYvpq/LkMNGyFlB1d8hTDzsAXa3OKtybdMAYsV/fw==}
-    engines: {node: '>= 20'}
-    peerDependencies:
-      '@octokit/core': '>=6'
 
   '@octokit/request-error@7.1.0':
     resolution: {integrity: sha512-KMQIfq5sOPpkQYajXHwnhjCC0slzCNScLHs9JafXc4RAJI+9f+jNDlBNaIMTvazOPLgb4BnlhGJOTbnN0wIjPw==}
@@ -505,14 +445,6 @@ packages:
 
   '@octokit/types@16.0.0':
     resolution: {integrity: sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg==}
-
-  '@octokit/webhooks-methods@6.0.0':
-    resolution: {integrity: sha512-MFlzzoDJVw/GcbfzVC1RLR36QqkTLUf79vLVO3D+xn7r0QgxnFoLZgtrzxiQErAjFUOdH6fas2KeQJ1yr/qaXQ==}
-    engines: {node: '>= 20'}
-
-  '@octokit/webhooks@14.2.0':
-    resolution: {integrity: sha512-da6KbdNCV5sr1/txD896V+6W0iamFWrvVl8cHkBSPT+YlvmT3DwXa4jxZnQc+gnuTEqSWbBeoSZYTayXH9wXcw==}
-    engines: {node: '>= 20'}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -582,26 +514,8 @@ packages:
   '@tsconfig/svelte@1.0.13':
     resolution: {integrity: sha512-5lYJP45Xllo4yE/RUBccBT32eBlRDbqN8r1/MIvQbKxW3aFqaYPCNgm8D5V20X4ShHcwvYWNlKg3liDh1MlBoA==}
 
-  '@types/aws-lambda@8.10.162':
-    resolution: {integrity: sha512-Fn658grtLOci1oxi1391vvDWJRKNGWRSqfxRkmN/Iy3c0tQH1USMKEXcPYHLvope+ZgTFocx9FRQJx1muBL6qw==}
-
-  '@types/body-parser@1.19.6':
-    resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
-
-  '@types/connect@3.4.38':
-    resolution: {integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==}
-
   '@types/css-font-loading-module@0.0.7':
     resolution: {integrity: sha512-nl09VhutdjINdWyXxHWN/w9zlNCfr60JUqJbd24YXUuCwgeL0TpFSdElCwb6cxfB6ybE19Gjj4g0jsgkXxKv1Q==}
-
-  '@types/express-serve-static-core@5.1.2':
-    resolution: {integrity: sha512-d3KvEXBSo/lOAMc2u6fkyDHBvetBHeqD7wm/AcXfLpSOQwlmG9D/aQ0SFswVjv05p7ullQS7Mjohj6/VdbZuTg==}
-
-  '@types/express@5.0.6':
-    resolution: {integrity: sha512-sKYVuV7Sv9fbPIt/442koC7+IIwK5olP1KWeD88e/idgoJqDm3JV/YUiPwkoKK92ylff2MGxSz1CSjsXelx0YA==}
-
-  '@types/http-errors@2.0.5':
-    resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
 
   '@types/node-fetch@2.6.13':
     resolution: {integrity: sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==}
@@ -612,20 +526,8 @@ packages:
   '@types/node@26.1.1':
     resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
 
-  '@types/qs@6.15.1':
-    resolution: {integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==}
-
-  '@types/range-parser@1.2.7':
-    resolution: {integrity: sha512-hKormJbkJqzQGhziax5PItDUTMAM9uE2XXQmM37dyd4hVM+5aVl7oVxMVUiVQn2oCQFN/LKCZdvSM0pFRqbSmQ==}
-
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
-
-  '@types/send@1.2.1':
-    resolution: {integrity: sha512-arsCikDvlU99zl1g69TcAB3mzZPpxgw0UQnaHeC1Nwb015xp8bknZv5rIfri9xTOcMuaVgvabfIRA7PSZVuZIQ==}
-
-  '@types/serve-static@2.2.0':
-    resolution: {integrity: sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -977,10 +879,6 @@ packages:
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
-
-  eventsource@4.1.0:
-    resolution: {integrity: sha512-2GuF51iuHX6A9xdTccMTsNb7VO0lHZihApxhvQzJB5A03DvHDd2FQepodbMaztPBmBcE/ox7o2gqaxGhYB9LhQ==}
-    engines: {node: '>=20.0.0'}
 
   express-rate-limit@8.6.0:
     resolution: {integrity: sha512-XKJXDsASUOo0LLtFwW5hCcQGH0N4WQc/Rn8/Pvoia+TJFOkkFPvrtW9lZOeeNcxQJspvOIERMwiRLsVFlhHEkA==}
@@ -1438,11 +1336,6 @@ packages:
     resolution: {integrity: sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==}
     engines: {node: '>= 0.4'}
 
-  smee-client@5.0.0:
-    resolution: {integrity: sha512-OYL8xPr1Tc0iqGohTGqHO/qEvUrPktK0a2Qcb0Uuj+j4KLnH5bsOhOlmpnmdh4zgzL3OwTfodcmkg5fVgiMUHw==}
-    engines: {node: ^20.18 || >= 22}
-    hasBin: true
-
   sonic-boom@4.2.1:
     resolution: {integrity: sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q==}
 
@@ -1471,10 +1364,6 @@ packages:
   tldts@7.4.9:
     resolution: {integrity: sha512-3kZ8wQQ/k5DrChD4X4FVvr2D7E5uoRgAqkPyLpSCGUvqOvqu+JEdr3mwMUaVWb+vMHZaKhF5fp2PBigKsui7hA==}
     hasBin: true
-
-  toad-cache@3.7.4:
-    resolution: {integrity: sha512-m1TdR/rvT7kgGJZhspNtXdsdYk0fddFpJJFlG5s+UkPFo6lkLoZ3YLOaovPYjq1R75NP5JfeTlSHaOsE09peCg==}
-    engines: {node: '>=20'}
 
   toidentifier@1.0.1:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
@@ -1513,9 +1402,6 @@ packages:
   undici@7.28.0:
     resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
-
-  universal-github-app-jwt@2.2.2:
-    resolution: {integrity: sha512-dcmbeSrOdTnsjGjUfAlqNDJrhxXizjAz94ija9Qw8YkZ1uu0d+GoZzyH+Jb9tIIqvGsadUfwg+22k5aDqqwzbw==}
 
   universal-user-agent@7.0.3:
     resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
@@ -1953,56 +1839,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@octokit/app@16.1.2':
-    dependencies:
-      '@octokit/auth-app': 8.2.0
-      '@octokit/auth-unauthenticated': 7.0.3
-      '@octokit/core': 7.0.6
-      '@octokit/oauth-app': 8.0.3
-      '@octokit/plugin-paginate-rest': 14.0.0(@octokit/core@7.0.6)
-      '@octokit/types': 16.0.0
-      '@octokit/webhooks': 14.2.0
-
-  '@octokit/auth-app@8.2.0':
-    dependencies:
-      '@octokit/auth-oauth-app': 9.0.3
-      '@octokit/auth-oauth-user': 6.0.2
-      '@octokit/request': 10.0.11
-      '@octokit/request-error': 7.1.0
-      '@octokit/types': 16.0.0
-      toad-cache: 3.7.4
-      universal-github-app-jwt: 2.2.2
-      universal-user-agent: 7.0.3
-
-  '@octokit/auth-oauth-app@9.0.3':
-    dependencies:
-      '@octokit/auth-oauth-device': 8.0.3
-      '@octokit/auth-oauth-user': 6.0.2
-      '@octokit/request': 10.0.11
-      '@octokit/types': 16.0.0
-      universal-user-agent: 7.0.3
-
-  '@octokit/auth-oauth-device@8.0.3':
-    dependencies:
-      '@octokit/oauth-methods': 6.0.2
-      '@octokit/request': 10.0.11
-      '@octokit/types': 16.0.0
-      universal-user-agent: 7.0.3
-
-  '@octokit/auth-oauth-user@6.0.2':
-    dependencies:
-      '@octokit/auth-oauth-device': 8.0.3
-      '@octokit/oauth-methods': 6.0.2
-      '@octokit/request': 10.0.11
-      '@octokit/types': 16.0.0
-      universal-user-agent: 7.0.3
-
   '@octokit/auth-token@6.0.0': {}
-
-  '@octokit/auth-unauthenticated@7.0.3':
-    dependencies:
-      '@octokit/request-error': 7.1.0
-      '@octokit/types': 16.0.0
 
   '@octokit/core@7.0.6':
     dependencies:
@@ -2025,34 +1862,7 @@ snapshots:
       '@octokit/types': 16.0.0
       universal-user-agent: 7.0.3
 
-  '@octokit/oauth-app@8.0.3':
-    dependencies:
-      '@octokit/auth-oauth-app': 9.0.3
-      '@octokit/auth-oauth-user': 6.0.2
-      '@octokit/auth-unauthenticated': 7.0.3
-      '@octokit/core': 7.0.6
-      '@octokit/oauth-authorization-url': 8.0.0
-      '@octokit/oauth-methods': 6.0.2
-      '@types/aws-lambda': 8.10.162
-      universal-user-agent: 7.0.3
-
-  '@octokit/oauth-authorization-url@8.0.0': {}
-
-  '@octokit/oauth-methods@6.0.2':
-    dependencies:
-      '@octokit/oauth-authorization-url': 8.0.0
-      '@octokit/request': 10.0.11
-      '@octokit/request-error': 7.1.0
-      '@octokit/types': 16.0.0
-
   '@octokit/openapi-types@27.0.0': {}
-
-  '@octokit/openapi-webhooks-types@12.1.0': {}
-
-  '@octokit/plugin-paginate-rest@14.0.0(@octokit/core@7.0.6)':
-    dependencies:
-      '@octokit/core': 7.0.6
-      '@octokit/types': 16.0.0
 
   '@octokit/request-error@7.1.0':
     dependencies:
@@ -2070,14 +1880,6 @@ snapshots:
   '@octokit/types@16.0.0':
     dependencies:
       '@octokit/openapi-types': 27.0.0
-
-  '@octokit/webhooks-methods@6.0.0': {}
-
-  '@octokit/webhooks@14.2.0':
-    dependencies:
-      '@octokit/openapi-webhooks-types': 12.1.0
-      '@octokit/request-error': 7.1.0
-      '@octokit/webhooks-methods': 6.0.0
 
   '@opentelemetry/api@1.9.0': {}
 
@@ -2144,33 +1946,7 @@ snapshots:
 
   '@tsconfig/svelte@1.0.13': {}
 
-  '@types/aws-lambda@8.10.162': {}
-
-  '@types/body-parser@1.19.6':
-    dependencies:
-      '@types/connect': 3.4.38
-      '@types/node': 26.1.1
-
-  '@types/connect@3.4.38':
-    dependencies:
-      '@types/node': 26.1.1
-
   '@types/css-font-loading-module@0.0.7': {}
-
-  '@types/express-serve-static-core@5.1.2':
-    dependencies:
-      '@types/node': 26.1.1
-      '@types/qs': 6.15.1
-      '@types/range-parser': 1.2.7
-      '@types/send': 1.2.1
-
-  '@types/express@5.0.6':
-    dependencies:
-      '@types/body-parser': 1.19.6
-      '@types/express-serve-static-core': 5.1.2
-      '@types/serve-static': 2.2.0
-
-  '@types/http-errors@2.0.5': {}
 
   '@types/node-fetch@2.6.13':
     dependencies:
@@ -2185,20 +1961,7 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
-  '@types/qs@6.15.1': {}
-
-  '@types/range-parser@1.2.7': {}
-
   '@types/retry@0.12.0': {}
-
-  '@types/send@1.2.1':
-    dependencies:
-      '@types/node': 26.1.1
-
-  '@types/serve-static@2.2.0':
-    dependencies:
-      '@types/http-errors': 2.0.5
-      '@types/node': 26.1.1
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -2484,10 +2247,6 @@ snapshots:
   eventsource-parser@3.1.0: {}
 
   eventsource@3.0.7:
-    dependencies:
-      eventsource-parser: 3.1.0
-
-  eventsource@4.1.0:
     dependencies:
       eventsource-parser: 3.1.0
 
@@ -3033,11 +2792,6 @@ snapshots:
       side-channel-map: 1.0.1
       side-channel-weakmap: 1.0.2
 
-  smee-client@5.0.0:
-    dependencies:
-      eventsource: 4.1.0
-      undici: 7.28.0
-
   sonic-boom@4.2.1:
     dependencies:
       atomic-sleep: 1.0.0
@@ -3059,8 +2813,6 @@ snapshots:
   tldts@7.4.9:
     dependencies:
       tldts-core: 7.4.9
-
-  toad-cache@3.7.4: {}
 
   toidentifier@1.0.1: {}
 
@@ -3113,8 +2865,6 @@ snapshots:
   undici-types@8.3.0: {}
 
   undici@7.28.0: {}
-
-  universal-github-app-jwt@2.2.2: {}
 
   universal-user-agent@7.0.3: {}
 

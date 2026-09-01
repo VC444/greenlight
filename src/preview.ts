@@ -1,8 +1,6 @@
-import type { getInstallationOctokit } from "./github.js";
-import type { PullRequestJob } from "./queue.js";
+import type { Octokit } from "@octokit/core";
+import type { PullRequestJob } from "./job.js";
 import { config } from "./config.js";
-
-type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
 /**
  * Outcome of resolving the PR's Vercel preview.
@@ -103,13 +101,12 @@ export async function waitForPreview(
     try {
       status = await latestPreviewStatus(octokit, job);
     } catch (error) {
-      // A 403 is a permission gap (the App lacks Deployments: Read), not a
-      // transient hiccup — it will never recover, so bail immediately instead
-      // of polling for the whole budget.
+      // A 403 is a permission gap, not a transient hiccup — it will never
+      // recover, so bail immediately instead of polling for the whole budget.
       if (isForbidden(error)) {
         console.warn(
-          `preview poll for ${label} forbidden — the GitHub App needs "Deployments: Read". ` +
-            `Grant it in the App's repository permissions and accept the update. Staying silent.`,
+          `preview poll for ${label} forbidden — the workflow needs "deployments: read" ` +
+            `in its permissions block. Staying silent.`,
         );
         return { status: "none" };
       }

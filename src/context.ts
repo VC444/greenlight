@@ -1,7 +1,5 @@
-import type { getInstallationOctokit } from "./github.js";
-import type { PullRequestJob } from "./queue.js";
-
-type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
+import type { Octokit } from "@octokit/core";
+import type { PullRequestJob } from "./job.js";
 
 export interface ChangedFile {
   path: string;
