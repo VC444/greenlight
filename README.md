@@ -26,10 +26,10 @@ Start a Codex or Claude Code session, then invoke Greenlight. You just have to p
 
 ```text
 # Codex
-$greenlight https://github.com/owner/repo/pull/123 https://preview.example.com
+$greenlight https://github.com/owner/repo/pull/123 http://localhost:3000
 
 # Claude Code
-/greenlight https://github.com/owner/repo/pull/123 https://preview.example.com
+/greenlight https://github.com/owner/repo/pull/123 http://localhost:3000
 ```
 
 Codex uses your ChatGPT subscription. Claude Code uses your Claude subscription.
