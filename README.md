@@ -22,7 +22,7 @@ npx skills add VC444/greenlight -g
 Start a Codex or Claude Code session, then invoke Greenlight. You just have to pass two args:
 
 1. Github PR Link
-2. URL where your web app is running (localhost or live url)
+2. URL where your web app is running with the PR changes (localhost or live url)
 
 ```text
 # Codex
