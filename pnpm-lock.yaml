@@ -41,6 +41,9 @@ importers:
       rrweb-player:
         specifier: ^2.1.1
         version: 2.1.1
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -48,9 +51,6 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
-      tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

@@ -71,9 +71,11 @@ function renderItems(items: ItemEvidence[]): string {
 }
 
 function replayLine(result: ExecutionResult): string {
-  return result.replayUrl
-    ? `\n\n▶️ [Watch the session replay](${result.replayUrl})`
-    : "";
+  if (!result.replayUrl) return "";
+  const target = /^https?:\/\//.test(result.replayUrl)
+    ? result.replayUrl
+    : `<${result.replayUrl.replace(/>/g, "%3E")}>`;
+  return `\n\n▶️ [Watch the session replay](${target})`;
 }
 
 /** Our check run for this SHA, if one is already there to update. */
@@ -190,11 +192,12 @@ export async function reportPaused(
   });
 }
 
-function renderResultsComment(
+export function renderResultsComment(
   plan: TestPlan,
   result: ExecutionResult,
   headSha: string,
   checkUrl: string | null,
+  surface: "github" | "local" = "github",
 ): string {
   const t = tally(result.items);
   const lines = [
@@ -207,9 +210,13 @@ function renderResultsComment(
   const replay = replayLine(result).trim();
   if (replay) lines.push("", replay);
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
+  const safety =
+    surface === "local"
+      ? "Greenlight reports locally; it does not change or gate the pull request"
+      : "❌ and ❔ never fail the check run: Greenlight reports, it doesn't gate the merge";
   lines.push(
     "",
-    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ❌ and ❔ never fail the check run: Greenlight reports, it doesn't gate the merge</sub>`,
+    `<sub>Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ${safety}</sub>`,
   );
   return lines.join("\n");
 }

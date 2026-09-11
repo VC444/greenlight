@@ -1,22 +1,50 @@
 # Greenlight
 
-Greenlight is a GitHub Action that turns your teammate's PR into a test plan and runs it in a real browser. It reports what worked and what didn't, with a recording of the entire session.
+Greenlight turns your teammate's pull request into a test plan and runs it in a real browser. It reports what worked and what didn't, with a recording of the entire session.
 
-It is built for **Next.js apps deployed on Vercel**. Other setups are out of
-scope for now.
+## Run Greenlight locally as a skill
 
-**The check is never red.** Greenlight's check run concludes `success` or
-`neutral`, nothing else. An AI judge that guesses wrong must never block a
-merge. When a run can't establish something, it says Inconclusive (❔) instead
-of failing you, and when it has nothing useful to say, it says nothing.
+Requires:
 
-Demo : https://www.youtube.com/watch?v=Av5Zy-Phg-0
+- Node 22.20 or newer
+- Chrome or Chromium
+- GitHub CLI
+- Codex or Claude Code
+
+### Install
+
+```bash
+npx skills add VC444/greenlight -g
+```
+
+### Run
+
+Start a Codex or Claude Code session, then invoke Greenlight. You just have to pass two args:
+
+1. Github PR Link
+2. URL where your web app is running (localhost or live url)
+
+```text
+# Codex
+$greenlight https://github.com/owner/repo/pull/123 https://preview.example.com
+
+# Claude Code
+/greenlight https://github.com/owner/repo/pull/123 https://preview.example.com
+```
+
+Codex uses your ChatGPT subscription. Claude Code uses your Claude subscription.
+Greenlight saves a replay to your Desktop unless you pass `--no-record`.
+
+## Want Greenlight on all PRs? Set up the GitHub Action
+
+The GitHub Action is built for **Next.js apps deployed on Vercel**. Other Action
+setups are out of scope for now.
+
+Demo: https://www.youtube.com/watch?v=Av5Zy-Phg-0
 
 Book a call: https://cal.com/vignesh-cal/greenlight-demo
 
 <img width="2557" height="1345" alt="Greenlight PR Comment" src="https://github.com/user-attachments/assets/337e5e0a-4b46-42b2-9efc-8014b0d0ba82" />
-
-## Steps to run
 
 **1. Go to your repo** that has Vercel preview deployments enabled.
 
@@ -90,7 +118,7 @@ editable. By default nothing is required of you: the run box is checked, so as
 soon as the preview is ready Greenlight goes.
 
 - **Uncheck "Run these checks"** to pause. Greenlight holds, says so on the PR,
-  and waits for you to check it again — then runs the plan _as the comment
+  and waits for you to check it again. It then runs the plan _as the comment
   stands_, including anything you changed while it waited.
 - **Uncheck an item** to skip just that one.
 - **Edit the wording** of a step, a route, or an expectation and Greenlight
@@ -111,7 +139,7 @@ that won't reach the finished run; push again to start over.
 | Input                   | Required | Description                                                                                                                                              |
 | ----------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `llm-api-key`           | yes      | API key for the provider named in `model`. Drives both plan generation and the browser run.                                                              |
-| `model`                 | yes      | `provider/model` to run. No default — the run fails without it. See [Choosing a model](#choosing-a-model).                                               |
+| `model`                 | yes      | `provider/model` to run. There is no default; the run fails without it. See [Choosing a model](#choosing-a-model).                                       |
 | `vercel-bypass-secret`  | no       | Vercel protection-bypass secret, for protected previews.                                                                                                 |
 | `executor-model`        | no       | Override just the model that drives and judges browser steps. Defaults to `model`.                                                                       |
 | `visual-judge-model`    | no       | Model that re-judges from a screenshot when the DOM can't settle an expectation. See [Judging what the DOM can't show](#judging-what-the-dom-cant-show). |

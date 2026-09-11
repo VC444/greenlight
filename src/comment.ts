@@ -213,7 +213,7 @@ function renderPlan(plan: TestPlan, headSha: string): string {
   return lines.join("\n");
 }
 
-function renderNothingToTest(plan: TestPlan, headSha: string): string {
+export function renderNothingToTest(plan: TestPlan, headSha: string): string {
   return [
     "### 🎄 Greenlight: nothing to verify",
     "",

@@ -12,9 +12,14 @@ import {
   languageModel,
   stagehandModelConfig,
   visualJudgeModelSpec,
-  type ModelSpec,
   type VisualJudge,
 } from "./llm.js";
+import {
+  runSubscriptionJson,
+  SubscriptionLLMClient,
+  subscriptionBackend,
+  type SubscriptionBackend,
+} from "./subscriptionCli.js";
 import {
   drainEvents,
   isRecording,
@@ -114,6 +119,14 @@ export interface ExecutionResult {
   items: ItemEvidence[];
 }
 
+type ActiveVisualJudge =
+  | ({ kind: "api" } & VisualJudge)
+  | {
+      kind: "subscription";
+      backend: SubscriptionBackend;
+      trusted: true;
+    };
+
 // In-process cap on concurrent browser sessions. Each one is a real Chrome, so
 // this bounds memory when several PRs are in flight; the while-loop re-checks
 // after each wake so slots are never double-granted.
@@ -135,7 +148,7 @@ function releaseSlot(): void {
 /** True when everything execution needs is configured: the LLM that drives +
  *  judges the steps, plus a browser to run them in. */
 export function canExecute(): boolean {
-  return Boolean(executorModelSpec()) && config.localBrowser;
+  return Boolean(subscriptionBackend() || executorModelSpec()) && config.localBrowser;
 }
 
 /**
@@ -153,19 +166,25 @@ export async function runPlan(
   previewUrl: string,
   plan: TestPlan,
 ): Promise<ExecutionResult | null> {
-  const spec = executorModelSpec();
-  if (!spec || !canExecute()) {
+  const localBackend = subscriptionBackend();
+  const spec = localBackend ? null : executorModelSpec();
+  if ((!localBackend && !spec) || !config.localBrowser) {
     console.warn(
-      "execution not configured (needs an LLM API key plus " +
+      "execution not configured (needs a subscription CLI or LLM API key plus " +
         "GREENLIGHT_LOCAL_BROWSER=1); skipping",
     );
     return null;
   }
-  const schemaWarning = executorSchemaWarning(spec);
+  const schemaWarning = spec ? executorSchemaWarning(spec) : null;
   if (schemaWarning) console.warn(schemaWarning);
   // Resolved once per run, not per item: an unusable spec should explain itself
   // a single time, and the escalation is optional either way.
-  const visualJudge = visualJudgeModelSpec(spec);
+  const apiVisualJudge = spec ? visualJudgeModelSpec(spec) : null;
+  const visualJudge: ActiveVisualJudge | null = localBackend
+    ? { kind: "subscription", backend: localBackend, trusted: true }
+    : apiVisualJudge
+      ? { kind: "api", ...apiVisualJudge }
+      : null;
 
   await acquireSlot();
   // Reason on our own model (disableAPI), never through Stagehand's hosted
@@ -175,7 +194,9 @@ export async function runPlan(
     disableAPI: true,
     verbose: (DEBUG ? 2 : 0) as 0 | 1 | 2,
     disablePino: true,
-    model: stagehandModelConfig(spec),
+    ...(localBackend
+      ? { llmClient: new SubscriptionLLMClient(localBackend) }
+      : { model: stagehandModelConfig(spec!) }),
     env: "LOCAL",
     localBrowserLaunchOptions: {
       viewport: DESKTOP_VIEWPORT,
@@ -185,15 +206,20 @@ export async function runPlan(
 
   try {
     await stagehand.init();
-    // Nothing hosts a replay for us: the run records itself (rrweb) and ships
-    // the result as a workflow artifact, so the run page is where a human goes
-    // to find it. Outside Actions there is no URL to point at at all.
-    const replayUrl = config.actionRunUrl || undefined;
-    const judgeNote = visualJudge
-      ? `, visual judge ${describe(visualJudge.spec)}` +
-        (visualJudge.trusted ? "" : " (unverified: cannot fail an item)")
+    const modelLabel = localBackend
+      ? `${localBackend} subscription`
+      : describe(spec!);
+    const visualJudgeLabel =
+      visualJudge?.kind === "subscription"
+        ? `${visualJudge.backend} subscription`
+        : visualJudge
+          ? describe(visualJudge.spec)
+          : null;
+    const judgeNote = visualJudgeLabel
+      ? `, visual judge ${visualJudgeLabel}` +
+        (visualJudge!.trusted ? "" : " (unverified: cannot fail an item)")
       : ", no visual judge";
-    console.log(`browser session (model ${describe(spec)}${judgeNote})`);
+    console.log(`browser session (model ${modelLabel}${judgeNote})`);
 
     const page =
       stagehand.context.activePage() ?? (await stagehand.context.newPage());
@@ -215,7 +241,8 @@ export async function runPlan(
         recordings.push({ intent: item.intent, route: item.route, events });
       }
     }
-    if (isRecording()) await writeReplay(recordings);
+    const replayFile = isRecording() ? await writeReplay(recordings) : null;
+    const replayUrl = config.actionRunUrl || replayFile || undefined;
 
     return { replayUrl, items };
   } catch (error) {
@@ -248,7 +275,7 @@ type StagehandPage = ReturnType<typeof Stagehand.prototype.context.activePage> &
 async function judgeFromScreenshot(
   page: StagehandPage,
   item: TestPlan["items"][number],
-  spec: ModelSpec,
+  judge: ActiveVisualJudge,
 ): Promise<z.infer<typeof JudgeSchema> | null> {
   try {
     dbg("capturing screenshot for visual judge");
@@ -257,8 +284,29 @@ async function judgeFromScreenshot(
     dbg(`screenshot in ${Date.now() - t}ms (${Math.round(shot.byteLength / 1024)}KB)`);
 
     t = Date.now();
+    const prompt =
+      `Determine whether this expectation is satisfied: "${item.expected}".\n` +
+      `The screenshot is the page as a user sees it, captured right after ` +
+      `performing: ${item.steps.join("; ")}.\n` +
+      `A judge reading only the DOM could not decide this, so judge from what ` +
+      `is rendered: layout, color, emphasis, visible text. Answer "pass" if ` +
+      `the outcome is clearly visible, "fail" if the screenshot clearly ` +
+      `contradicts it, and "cannot_tell" if the screenshot does not show enough ` +
+      `(it depends on the browser URL, a native dialog, or something below the fold).`;
+
+    if (judge.kind === "subscription") {
+      const raw = await runSubscriptionJson<unknown>(judge.backend, {
+        prompt,
+        schema: z.toJSONSchema(JudgeSchema),
+        images: [{ data: shot, extension: "jpeg" }],
+      });
+      const parsed = JudgeSchema.safeParse(raw);
+      dbg(`visual judge done in ${Date.now() - t}ms`);
+      return parsed.success ? parsed.data : null;
+    }
+
     const result = await generateText({
-      model: languageModel(spec),
+      model: languageModel(judge.spec),
       output: Output.object({ schema: JudgeSchema }),
       // A verdict plus one sentence is ~60 tokens; the rest is headroom for a
       // reasoning model, which bills its thinking to this budget and can spend
@@ -272,15 +320,7 @@ async function judgeFromScreenshot(
           content: [
             {
               type: "text",
-              text:
-                `Determine whether this expectation is satisfied: "${item.expected}".\n` +
-                `The screenshot is the page as a user sees it, captured right after ` +
-                `performing: ${item.steps.join("; ")}.\n` +
-                `A judge reading only the DOM could not decide this, so judge from what ` +
-                `is rendered — layout, color, emphasis, visible text. Answer "pass" if ` +
-                `the outcome is clearly visible, "fail" if the screenshot clearly ` +
-                `contradicts it, and "cannot_tell" if the screenshot doesn't show enough ` +
-                `(it depends on the browser URL, a native dialog, or something below the fold).`,
+              text: prompt,
             },
             { type: "file", data: shot, mediaType: "image/jpeg" },
           ],
@@ -311,7 +351,7 @@ async function runItem(
   page: StagehandPage,
   previewUrl: string,
   item: TestPlan["items"][number],
-  visualJudge: VisualJudge | null,
+  visualJudge: ActiveVisualJudge | null,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
   const onConsole = (m: { type(): string; text(): string }) => {
@@ -380,7 +420,7 @@ async function runItem(
     // show a wrong red.
     let final: z.infer<typeof JudgeSchema> = judgment;
     if (judgment.verdict === "cannot_tell" && visualJudge) {
-      const visual = await judgeFromScreenshot(page, item, visualJudge.spec);
+      const visual = await judgeFromScreenshot(page, item, visualJudge);
       // A judge we defaulted to on an OpenAI-compatible host may never have seen
       // the screenshot at all (some hosts drop the image part rather than
       // erroring), so its "fail" is not evidence of anything. Keep the useful

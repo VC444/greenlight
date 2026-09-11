@@ -4,7 +4,30 @@
   "private": true,
   "description": "Github Action that infers what a PR is meant to do and tests its Vercel preview in a real browser",
   "type": "module",
+  "bin": {
+    "greenlight": "bin/greenlight.mjs"
+  },
+  "files": [
+    "bin",
+    "src/comment.ts",
+    "src/config.ts",
+    "src/context.ts",
+    "src/execute.ts",
+    "src/llm.ts",
+    "src/preview.ts",
+    "src/recorder.ts",
+    "src/results.ts",
+    "src/skill.ts",
+    "src/skillMain.ts",
+    "src/skillOptions.ts",
+    "src/subscriptionCli.ts",
+    "src/testplan.ts"
+  ],
+  "engines": {
+    "node": ">=22.20.0"
+  },
   "scripts": {
+    "test": "node --import tsx --test src/skill.test.ts",
     "typecheck": "tsc --noEmit",
     "preversion": "pnpm typecheck",
     "version": "node scripts/pin-readme-version.mjs && git add README.md",
@@ -28,11 +51,11 @@
     "playwright-core": "^1.61.1",
     "rrweb": "^2.1.1",
     "rrweb-player": "^2.1.1",
+    "tsx": "^4.23.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }
 }

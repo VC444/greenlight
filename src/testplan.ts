@@ -3,6 +3,10 @@ import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import type { PrContext } from "./context.js";
 import { describe, languageModel, planModelSpec } from "./llm.js";
+import {
+  runSubscriptionJson,
+  subscriptionBackend,
+} from "./subscriptionCli.js";
 
 const TestPlanItemSchema = z.object({
   intent: z
@@ -137,6 +141,28 @@ const MAX_OUTPUT_TOKENS = 32000;
 export async function generateTestPlan(
   ctx: PrContext,
 ): Promise<TestPlan | null> {
+  const localBackend = subscriptionBackend();
+  if (localBackend) {
+    try {
+      const raw = await runSubscriptionJson<unknown>(localBackend, {
+        system: SYSTEM_PROMPT + SCHEMA_NOTE,
+        prompt: renderContext(ctx),
+        schema: z.toJSONSchema(TestPlanSchema),
+      });
+      const parsed = TestPlanSchema.safeParse(raw);
+      if (parsed.success) return parsed.data;
+      console.warn(
+        `${localBackend} subscription returned an invalid Greenlight test plan.`,
+      );
+      return null;
+    } catch {
+      console.warn(
+        `${localBackend} subscription could not generate the Greenlight test plan.`,
+      );
+      return null;
+    }
+  }
+
   // Resolve credentials before the SDK does — its error is provider-specific
   // ("See https://docs.fireworks.ai/...") and says nothing about where the key
   // was supposed to come from. A null here has already been explained.
