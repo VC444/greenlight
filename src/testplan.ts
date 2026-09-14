@@ -5,6 +5,7 @@ import type { PrContext } from "./context.js";
 import { describe, languageModel, planModelSpec } from "./llm.js";
 import {
   runSubscriptionJson,
+  SubscriptionRequestError,
   subscriptionBackend,
 } from "./subscriptionCli.js";
 
@@ -155,7 +156,8 @@ export async function generateTestPlan(
         `${localBackend} subscription returned an invalid Greenlight test plan.`,
       );
       return null;
-    } catch {
+    } catch (error) {
+      if (error instanceof SubscriptionRequestError) throw error;
       console.warn(
         `${localBackend} subscription could not generate the Greenlight test plan.`,
       );

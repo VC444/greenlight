@@ -11,6 +11,7 @@ import { generateTestPlan, type TestPlan } from "./testplan.js";
 import type { PullRequestJob } from "./job.js";
 import {
   subscriptionBackend,
+  SubscriptionRequestError,
   validateSubscriptionAuth,
 } from "./subscriptionCli.js";
 
@@ -371,7 +372,10 @@ export async function runGreenlightSkill(
   let plan: TestPlan | null;
   try {
     plan = await dependencies.generatePlan(context);
-  } catch {
+  } catch (error) {
+    if (error instanceof SubscriptionRequestError) {
+      throw new SkillError(`Could not generate the Greenlight test plan: ${error.message}`);
+    }
     throw new SkillError(
       "Greenlight could not generate a test plan. Check the model settings and provider credentials.",
     );

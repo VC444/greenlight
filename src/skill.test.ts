@@ -938,3 +938,74 @@ test("subprocess input is delivered normally and spawn errors reject", async () 
   assert.equal(result.stdout.trim(), String(input.length));
   await assert.rejects(runProcess({ file: "/nonexistent/greenlight-cli", args: [], cwd: os.tmpdir(), input }), { code: "ENOENT" });
 });
+
+
+test("subscription failures report safe diagnostics instead of hiding the cause", async () => {
+  const request = { prompt: "private PR text", schema: { type: "object" } };
+  const cases = [
+    { result: { code: 1, stdout: "private PR text", stderr: "secret-token" }, expected: /Claude Code.*exit code 1/ },
+    { result: { code: 0, stdout: "secret-token", stderr: "" }, expected: /Claude Code.*invalid JSON/ },
+    { result: { code: 0, stdout: "{}", stderr: "" }, expected: /Claude Code.*no structured output/ },
+    { result: { code: 0, stdout: JSON.stringify({ is_error: true, subtype: "error_max_structured_output_retries", errors: ["secret-token"], structured_output: { misleading: true } }), stderr: "" }, expected: /Claude Code.*structured output retry limit/ },
+  ];
+  for (const { result, expected } of cases) {
+    await assert.rejects(runSubscriptionJson("claude", request, async () => result), (error: unknown) => {
+      assert.match((error as Error).message, expected);
+      assert.doesNotMatch((error as Error).message, /private PR text|secret-token/);
+      return true;
+    });
+  }
+});
+
+
+test("safe subscription diagnostics survive the real planner and skill boundaries", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "greenlight-diagnostics-"));
+  try {
+    const cli = path.join(directory, "claude");
+    writeFileSync(cli, `#!${process.execPath}
+process.stdin.resume();
+process.stdin.on("end", () => {
+  console.error("secret-token and private PR text");
+  process.exitCode = 7;
+});
+`);
+    chmodSync(cli, 0o755);
+    const skillUrl = new URL("./skill.ts", import.meta.url).href;
+    const plannerUrl = new URL("./testplan.ts", import.meta.url).href;
+    const script = `
+      import { runGreenlightSkill } from ${JSON.stringify(skillUrl)};
+      import { generateTestPlan } from ${JSON.stringify(plannerUrl)};
+      try {
+        await runGreenlightSkill(["https://github.com/example/repo/pull/1", "https://preview.example"], {
+          resolveToken: async () => "synthetic-token",
+          createClient: () => ({ request: async () => ({ data: { login: "tester", head: { sha: "abc" } } }) }),
+          validateModel: async () => {},
+          gatherContext: async () => (${JSON.stringify(context)}),
+          generatePlan: generateTestPlan,
+        });
+        process.exitCode = 2;
+      } catch (error) {
+        console.error(error.message);
+        process.exitCode = 1;
+      }
+    `;
+    const run = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      encoding: "utf8", timeout: 10000,
+      env: { ...process.env, PATH: directory, GREENLIGHT_LOCAL_AGENT: "claude" },
+    });
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stderr, /Could not generate the Greenlight test plan: Claude Code failed with exit code 7/);
+    assert.doesNotMatch(run.stderr + run.stdout, /secret-token|private PR text|provider credentials/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("model subprocess timeouts remain identifiable without raw output", async () => {
+  await assert.rejects(runSubscriptionJson("claude", {
+    prompt: "synthetic prompt", schema: { type: "object" },
+  }, async () => runProcess({
+    file: process.execPath, args: ["-e", "setTimeout(() => {}, 10000)"],
+    cwd: os.tmpdir(), timeoutMs: 50,
+  })), /Claude Code timed out/);
+});

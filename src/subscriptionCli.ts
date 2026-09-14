@@ -14,6 +14,44 @@ import {
 
 export type SubscriptionBackend = "codex" | "claude";
 
+type SubscriptionFailure =
+  | "exit"
+  | "invalid-json"
+  | "missing-output"
+  | "structured-retries"
+  | "cli-error"
+  | "unsupported-option"
+  | "timeout"
+  | "output-limit"
+  | "input-closed"
+  | "spawn";
+
+// Only fixed diagnostic text crosses into the user-facing report.
+export class SubscriptionRequestError extends Error {
+  constructor(backend: SubscriptionBackend, reason: SubscriptionFailure, code?: number | null) {
+    const detail: Record<SubscriptionFailure, string> = {
+      exit: code == null ? "exited without an exit code" : `failed with exit code ${code}`,
+      "invalid-json": "returned invalid JSON",
+      "missing-output": "returned no structured output",
+      "structured-retries": "reached its structured output retry limit",
+      "cli-error": "reported a model request error",
+      "unsupported-option": "rejected a CLI option; check the installed Claude Code version",
+      timeout: "timed out while generating a response",
+      "output-limit": "exceeded Greenlight's response size limit",
+      "input-closed": "closed stdin before accepting the full request",
+      spawn: "could not start; check that its CLI is available to Greenlight",
+    };
+    super(`${backend === "claude" ? "Claude Code" : "Codex"} ${detail[reason]}.`);
+    this.name = "SubscriptionRequestError";
+  }
+}
+
+class ProcessFailure extends Error {
+  constructor(readonly reason: "timeout" | "output-limit" | "input-closed") {
+    super(reason);
+  }
+}
+
 export interface ProcessRequest {
   file: string;
   args: string[];
@@ -111,15 +149,15 @@ export async function runProcess(
     child.once("close", (code) => {
       clearTimeout(timer);
       if (outputTooLarge) {
-        reject(new Error(`${request.file} produced too much output.`));
+        reject(new ProcessFailure("output-limit"));
         return;
       }
       if (timedOut) {
-        reject(new Error(`${request.file} timed out.`));
+        reject(new ProcessFailure("timeout"));
         return;
       }
       if (inputError && code === 0) {
-        reject(new Error(`${request.file} closed stdin before accepting the full request.`));
+        reject(new ProcessFailure("input-closed"));
         return;
       }
       resolve({ code, stdout, stderr });
@@ -192,16 +230,37 @@ function cleanJson(text: string): unknown {
   return JSON.parse(unfenced);
 }
 
-function claudeStructuredOutput(stdout: string): unknown {
-  const envelope = JSON.parse(stdout) as {
-    structured_output?: unknown;
-    result?: string;
-  };
-  if (envelope.structured_output !== undefined) {
-    return envelope.structured_output;
+function claudeStructuredOutput(result: ProcessResult): unknown {
+  let envelope: Record<string, unknown> | undefined;
+  try {
+    const parsed: unknown = JSON.parse(result.stdout);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      envelope = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Classify invalid output without including it in the error.
   }
-  if (envelope.result) return cleanJson(envelope.result);
-  throw new Error("Claude Code returned no structured output.");
+  if (result.code !== 0 || envelope?.is_error === true) {
+    if (envelope?.subtype === "error_max_structured_output_retries") {
+      throw new SubscriptionRequestError("claude", "structured-retries");
+    }
+    if (/unknown option|unrecognized option/i.test(result.stderr)) {
+      throw new SubscriptionRequestError("claude", "unsupported-option");
+    }
+    throw new SubscriptionRequestError(
+      "claude", result.code === 0 ? "cli-error" : "exit", result.code,
+    );
+  }
+  if (!envelope) throw new SubscriptionRequestError("claude", "invalid-json");
+  if (envelope.structured_output !== undefined) return envelope.structured_output;
+  if (typeof envelope.result === "string" && envelope.result) {
+    try {
+      return cleanJson(envelope.result);
+    } catch {
+      throw new SubscriptionRequestError("claude", "invalid-json");
+    }
+  }
+  throw new SubscriptionRequestError("claude", "missing-output");
 }
 
 function renderMessages(messages: ChatMessage[]): {
@@ -258,6 +317,15 @@ export async function runSubscriptionJson<T>(
   request: SubscriptionJsonRequest,
   runner: ProcessRunner = runProcess,
 ): Promise<T> {
+  const execute: ProcessRunner = async (processRequest) => {
+    try {
+      return await runner(processRequest);
+    } catch (error) {
+      throw new SubscriptionRequestError(
+        backend, error instanceof ProcessFailure ? error.reason : "spawn",
+      );
+    }
+  };
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "greenlight-model-"));
   try {
     const schemaFile = path.join(tempDir, "schema.json");
@@ -302,14 +370,14 @@ export async function runSubscriptionJson<T>(
       ];
       for (const imagePath of imagePaths) args.push("--image", imagePath);
       args.push("-");
-      const result = await runner({
+      const result = await execute({
         file: "codex",
         args,
         cwd: tempDir,
         input: prompt,
       });
       if (result.code !== 0) {
-        throw new Error("Codex could not complete a structured model request.");
+        throw new SubscriptionRequestError("codex", "exit", result.code);
       }
       return cleanJson(await readFile(outputFile, "utf8")) as T;
     }
@@ -329,16 +397,13 @@ export async function runSubscriptionJson<T>(
       ...modelArgs(backend),
     ];
     if (imagePaths.length) args.push("--add-dir", tempDir);
-    const result = await runner({
+    const result = await execute({
       file: "claude",
       args,
       cwd: tempDir,
       input: prompt,
     });
-    if (result.code !== 0) {
-      throw new Error("Claude Code could not complete a structured model request.");
-    }
-    return claudeStructuredOutput(result.stdout) as T;
+    return claudeStructuredOutput(result) as T;
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
