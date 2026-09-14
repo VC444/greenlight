@@ -62,6 +62,13 @@ $greenlight https://github.com/owner/repo/pull/123 http://localhost:3000
 /greenlight https://github.com/owner/repo/pull/123 http://localhost:3000
 ```
 
+Local skill mode also accepts GitHub Enterprise Server PR URLs, such as
+`https://github.infra.cloudera.com/AWC/awc-core/pull/1259`. Authenticate with
+`gh auth login -h github.infra.cloudera.com` on the machine running the skill.
+Enterprise Server uses `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` when set,
+otherwise Greenlight reads the GitHub CLI token for the supplied hostname.
+Public GitHub tokens are not reused for Enterprise Server hosts.
+
 Codex uses your ChatGPT subscription. Claude Code uses your Claude subscription.
 Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 

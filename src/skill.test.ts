@@ -325,11 +325,11 @@ function dependencies(
 test("parses canonical GitHub PR URLs", () => {
   assert.deepEqual(
     parsePullRequestUrl("https://github.com/VC444/greenlight/pull/42"),
-    { owner: "VC444", repo: "greenlight", number: 42 },
+    { hostname: "github.com", owner: "VC444", repo: "greenlight", number: 42 },
   );
   assert.deepEqual(
     parsePullRequestUrl("https://github.com/VC444/greenlight/pull/42/"),
-    { owner: "VC444", repo: "greenlight", number: 42 },
+    { hostname: "github.com", owner: "VC444", repo: "greenlight", number: 42 },
   );
 });
 
@@ -337,7 +337,8 @@ test("rejects malformed or unsupported GitHub PR URLs", () => {
   for (const value of [
     "not-a-url",
     "http://github.com/VC444/greenlight/pull/42",
-    "https://example.com/VC444/greenlight/pull/42",
+    "https://user:secret@github.com/VC444/greenlight/pull/42",
+    "https://github.com:8443/VC444/greenlight/pull/42",
     "https://github.com/VC444/greenlight/issues/42",
     "https://github.com/VC444/greenlight/pull/0",
     "https://github.com/VC444/greenlight/pull/42?diff=split",
@@ -824,4 +825,80 @@ test("normalizes planner and browser runner failures", async () => {
       return true;
     },
   );
+});
+
+
+test("routes an Enterprise PR through host-specific authentication and API", async () => {
+  const hostname = "github.infra.cloudera.com";
+  const url = `https://${hostname}/AWC/awc-core/pull/1259`;
+  assert.deepEqual(parsePullRequestUrl(url), {
+    hostname, owner: "AWC", repo: "awc-core", number: 1259,
+  });
+  const routes: string[] = [];
+  await runGreenlightSkill([url, "https://preview.example"], dependencies(routes, {
+    resolveToken: async (host) => {
+      assert.equal(host, hostname);
+      return "enterprise-token";
+    },
+    createClient: (token, baseUrl) => {
+      assert.equal(token, "enterprise-token");
+      assert.equal(baseUrl, `https://${hostname}/api/v3`);
+      return fakeClient(routes);
+    },
+    gatherContext: async (_client, job) => {
+      assert.equal(job.owner, "AWC");
+      assert.equal(job.repo, "awc-core");
+      assert.equal(job.prNumber, 1259);
+      return context;
+    },
+  }));
+  assert.ok(routes.length > 0);
+  assert.ok(routes.every((route) => route.startsWith("GET ")));
+});
+
+test("Enterprise credentials never fall back to public GitHub tokens", async () => {
+  const hostname = "github.infra.cloudera.com";
+  const env = { GH_TOKEN: "public-token", GITHUB_TOKEN: "public-fallback" };
+  const command = async (file: string, args: string[]) => {
+    assert.equal(file, "gh");
+    assert.deepEqual(args, ["auth", "token", "--hostname", hostname]);
+    return "enterprise-cli-token";
+  };
+  assert.equal(await resolveGitHubToken(env, command, hostname), "enterprise-cli-token");
+  const shouldNotRun = async (): Promise<string> => { throw new Error("unexpected CLI"); };
+  assert.equal(await resolveGitHubToken({ ...env, GH_ENTERPRISE_TOKEN: " first ", GITHUB_ENTERPRISE_TOKEN: "second" }, shouldNotRun, hostname), "first");
+  assert.equal(await resolveGitHubToken({ ...env, GITHUB_ENTERPRISE_TOKEN: " second " }, shouldNotRun, hostname), "second");
+  await assert.rejects(resolveGitHubToken(env, async () => { throw new Error("secret"); }, hostname), (error: unknown) => {
+    assert.match((error as Error).message, /gh auth login -h github\.infra\.cloudera\.com/);
+    assert.doesNotMatch((error as Error).message, /secret/);
+    return true;
+  });
+});
+
+
+test("the default client sends requests to the PR host's API", async (t) => {
+  const urls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ login: "reviewer", head: { sha: "abc123" } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  for (const [hostname, baseUrl] of [
+    ["github.com", "https://api.github.com"],
+    ["github.infra.cloudera.com", "https://github.infra.cloudera.com/api/v3"],
+    ["example.ghe.com", "https://api.example.ghe.com"],
+  ] as const) {
+    urls.length = 0;
+    const { createClient: _fakeClient, ...overrides } = dependencies([]);
+    await runGreenlightSkill([
+      `https://${hostname}/AWC/awc-core/pull/1259`, "https://preview.example",
+    ], overrides);
+    assert.deepEqual(urls, [
+      `${baseUrl}/user`,
+      `${baseUrl}/repos/AWC/awc-core`,
+      `${baseUrl}/repos/AWC/awc-core/pulls/1259`,
+    ]);
+  }
 });

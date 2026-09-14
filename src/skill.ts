@@ -29,6 +29,7 @@ export class SkillError extends Error {
 }
 
 export interface PullRequestTarget {
+  hostname: string;
   owner: string;
   repo: string;
   number: number;
@@ -44,8 +45,8 @@ type CommandRunner = (file: string, args: string[]) => Promise<string>;
 
 export interface SkillDependencies {
   env: NodeJS.ProcessEnv;
-  resolveToken: () => Promise<string>;
-  createClient: (token: string) => GitHubClient;
+  resolveToken: (hostname: string) => Promise<string>;
+  createClient: (token: string, baseUrl: string) => GitHubClient;
   gatherContext: typeof gatherPrContext;
   generatePlan: (
     context: Awaited<ReturnType<typeof gatherPrContext>>,
@@ -66,13 +67,12 @@ export function parsePullRequestUrl(raw: string): PullRequestTarget {
     url = new URL(raw);
   } catch {
     throw new SkillError(
-      `Invalid GitHub PR URL: "${raw}". Expected https://github.com/<owner>/<repo>/pull/<number>.`,
+      `Invalid GitHub PR URL: "${raw}". Expected https://<github-host>/<owner>/<repo>/pull/<number>.`,
     );
   }
 
   if (
     url.protocol !== "https:" ||
-    url.hostname !== "github.com" ||
     url.port ||
     url.username ||
     url.password ||
@@ -80,7 +80,7 @@ export function parsePullRequestUrl(raw: string): PullRequestTarget {
     url.hash
   ) {
     throw new SkillError(
-      `Unsupported GitHub PR URL: "${raw}". Use https://github.com/<owner>/<repo>/pull/<number>.`,
+      `Unsupported GitHub PR URL: "${raw}". Use https://<github-host>/<owner>/<repo>/pull/<number>.`,
     );
   }
 
@@ -89,11 +89,16 @@ export function parsePullRequestUrl(raw: string): PullRequestTarget {
   );
   if (!match?.[1] || !match[2] || !match[3]) {
     throw new SkillError(
-      `Invalid GitHub PR URL: "${raw}". Expected https://github.com/<owner>/<repo>/pull/<number>.`,
+      `Invalid GitHub PR URL: "${raw}". Expected https://<github-host>/<owner>/<repo>/pull/<number>.`,
     );
   }
 
-  return { owner: match[1], repo: match[2], number: Number(match[3]) };
+  return {
+    hostname: url.hostname,
+    owner: match[1],
+    repo: match[2],
+    number: Number(match[3]),
+  };
 }
 
 export function parsePreviewUrl(raw: string): string {
@@ -131,31 +136,44 @@ export function parseSkillInput(args: string[]): SkillInput {
   };
 }
 
+function usesCloudTokens(hostname: string): boolean {
+  return hostname === "github.com" || hostname.endsWith(".ghe.com");
+}
+
+function gitHubApiUrl(hostname: string): string {
+  if (hostname === "github.com") return "https://api.github.com";
+  if (hostname.endsWith(".ghe.com")) return `https://api.${hostname}`;
+  return `https://${hostname}/api/v3`;
+}
+
 export async function resolveGitHubToken(
   env: NodeJS.ProcessEnv = process.env,
   command: CommandRunner = runCommand,
+  hostname = "github.com",
 ): Promise<string> {
-  const fromEnvironment = env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim();
+  const fromEnvironment = usesCloudTokens(hostname)
+    ? env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim()
+    : env.GH_ENTERPRISE_TOKEN?.trim() || env.GITHUB_ENTERPRISE_TOKEN?.trim();
   if (fromEnvironment) return fromEnvironment;
 
   try {
     const token = (
-      await command("gh", ["auth", "token", "--hostname", "github.com"])
+      await command("gh", ["auth", "token", "--hostname", hostname])
     ).trim();
     if (token) return token;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new SkillError(
-        "GitHub CLI was not found. Install `gh`, then run `gh auth login -h github.com`.",
+        `GitHub CLI was not found. Install \`gh\`, then run \`gh auth login -h ${hostname}\`.`,
       );
     }
     throw new SkillError(
-      "GitHub CLI could not read a token. Run `gh auth login -h github.com`. If `gh auth status -h github.com` succeeds in your terminal, approve the Codex host-access request so Greenlight can read the system keyring.",
+      `GitHub CLI could not read a token. Run \`gh auth login -h ${hostname}\`. If \`gh auth status -h ${hostname}\` succeeds in your terminal, approve the agent host-access request so Greenlight can read the system keyring.`,
     );
   }
 
   throw new SkillError(
-    "GitHub CLI returned no token. Run `gh auth login -h github.com` and try again.",
+    `GitHub CLI returned no token. Run \`gh auth login -h ${hostname}\` and try again.`,
   );
 }
 
@@ -220,7 +238,7 @@ async function validateGitHubAccess(
     login = data.login;
   } catch {
     throw new SkillError(
-      "GitHub authentication was rejected. Refresh GH_TOKEN or GITHUB_TOKEN, or run `gh auth login -h github.com`, then try again.",
+      `GitHub authentication was rejected. Refresh ${usesCloudTokens(target.hostname) ? "GH_TOKEN or GITHUB_TOKEN" : "GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN"}, or run \`gh auth login -h ${target.hostname}\`, then try again.`,
     );
   }
 
@@ -304,8 +322,9 @@ function appendActionPrompt(report: string): string {
 
 const defaultDependencies: SkillDependencies = {
   env: process.env,
-  resolveToken: () => resolveGitHubToken(),
-  createClient: (token) => new Octokit({ auth: token }) as unknown as GitHubClient,
+  resolveToken: (hostname) => resolveGitHubToken(process.env, runCommand, hostname),
+  createClient: (token, baseUrl) =>
+    new Octokit({ auth: token, baseUrl }) as unknown as GitHubClient,
   gatherContext: gatherPrContext,
   generatePlan: generateTestPlan,
   executePlan: runPlan,
@@ -319,8 +338,11 @@ export async function runGreenlightSkill(
 ): Promise<string> {
   const input = parseSkillInput(args);
   const dependencies = { ...defaultDependencies, ...overrides };
-  const token = await dependencies.resolveToken();
-  const client = dependencies.createClient(token);
+  const token = await dependencies.resolveToken(input.pullRequest.hostname);
+  const client = dependencies.createClient(
+    token,
+    gitHubApiUrl(input.pullRequest.hostname),
+  );
   const { headSha } = await validateGitHubAccess(client, input.pullRequest);
   await dependencies.validateModel(dependencies.env);
 
