@@ -17,6 +17,36 @@ Requires:
 npx skills add VC444/greenlight -g
 ```
 
+### Codex permissions
+
+Greenlight reads the supplied pull request, opens the supplied preview in
+Chrome, sends the required context and screenshots to your current ChatGPT
+subscription, and writes the replay locally. Codex may deny the run if that
+authorization is not explicit.
+
+To authorize this workflow once for future Greenlight runs, add the following
+to `~/.codex/AGENTS.md`:
+
+```markdown
+## Greenlight
+
+When I explicitly invoke `$greenlight` with a GitHub pull request URL and a
+preview URL, that invocation authorizes Greenlight to:
+
+- inspect only that pull request and preview;
+- send the required pull request context and preview screenshots to my current
+  ChatGPT subscription for analysis;
+- control Chrome and use stored authentication only to access the supplied
+  URLs;
+- write the replay to the requested directory, or to the Desktop by default.
+
+This authorization applies only to the supplied URLs and the current run. It
+does not authorize posting to the pull request, changing repository data,
+exposing credential values, or accessing unrelated sites.
+```
+
+Restart Codex after changing `~/.codex/AGENTS.md`.
+
 ### Run
 
 Start a Codex or Claude Code session, then invoke Greenlight. You just have to pass two args:

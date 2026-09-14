@@ -639,6 +639,7 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
   assert.match(report, /### 🎄 Greenlight Results:/);
   assert.match(report, /1 passed/);
   assert.match(report, /Greenlight reports locally/);
+  assert.doesNotMatch(report, /<\/?sub>/);
   assert.match(
     report,
     /\[Watch the session replay\]\(<\/Users\/developer\/Desktop\/Greenlight Run\/replay\.html>\)/,
