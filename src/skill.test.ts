@@ -17,6 +17,7 @@ import { gatherPrContext, type PrContext } from "./context.js";
 import type { ExecutionResult } from "./execute.js";
 import { parseLocalSkillOptions } from "./skillOptions.js";
 import {
+  runProcess,
   runSubscriptionJson,
   subscriptionBackend,
   SubscriptionLLMClient,
@@ -524,6 +525,9 @@ test("runs structured Codex and Claude subscription requests", async () => {
   const claudeRunner: ProcessRunner = async (request) => {
     assert.equal(request.file, "claude");
     assert.ok(request.args.includes("--safe-mode"));
+    assert.ok(!request.args.includes("--restricted"));
+    assert.equal(request.args[request.args.indexOf("--tools") + 1], "");
+    assert.equal(request.args[request.args.indexOf("--permission-mode") + 1], "dontAsk");
     assert.ok(request.args.includes("--no-session-persistence"));
     return {
       code: 0,
@@ -901,4 +905,36 @@ test("the default client sends requests to the PR host's API", async (t) => {
       `${baseUrl}/repos/AWC/awc-core/pulls/1259`,
     ]);
   }
+});
+
+
+test("an early subprocess exit preserves stderr instead of crashing on EPIPE", () => {
+  const moduleUrl = new URL("./subscriptionCli.ts", import.meta.url).href;
+  const script = `
+    import { runProcess } from ${JSON.stringify(moduleUrl)};
+    const result = await runProcess({
+      file: process.execPath,
+      args: ["-e", "console.error('unsupported option'); process.exit(1)"],
+      cwd: process.cwd(),
+      input: "x".repeat(2 * 1024 * 1024),
+    });
+    console.log(JSON.stringify(result));
+  `;
+  const run = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    encoding: "utf8", timeout: 10000,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), { code: 1, stdout: "", stderr: "unsupported option\n" });
+});
+
+test("subprocess input is delivered normally and spawn errors reject", async () => {
+  const input = "prompt".repeat(50000);
+  const result = await runProcess({
+    file: process.execPath,
+    args: ["-e", "let n = 0; process.stdin.on('data', c => n += c.length); process.stdin.on('end', () => console.log(n))"],
+    cwd: os.tmpdir(), input,
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout.trim(), String(input.length));
+  await assert.rejects(runProcess({ file: "/nonexistent/greenlight-cli", args: [], cwd: os.tmpdir(), input }), { code: "ENOENT" });
 });

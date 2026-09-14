@@ -77,6 +77,7 @@ export async function runProcess(
     let stderr = "";
     let outputTooLarge = false;
     let timedOut = false;
+    let inputError: Error | undefined;
 
     const append = (current: string, chunk: Buffer): string => {
       if (Buffer.byteLength(current) + chunk.byteLength > MAX_OUTPUT_BYTES) {
@@ -94,6 +95,12 @@ export async function runProcess(
       stderr = append(stderr, chunk);
     });
     child.once("error", reject);
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      inputError = error;
+      // An early CLI exit can close stdin before the prompt finishes writing.
+      // Wait for close so its exit status and diagnostics are preserved.
+      if (error.code !== "EPIPE") child.kill("SIGTERM");
+    });
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -109,6 +116,10 @@ export async function runProcess(
       }
       if (timedOut) {
         reject(new Error(`${request.file} timed out.`));
+        return;
+      }
+      if (inputError && code === 0) {
+        reject(new Error(`${request.file} closed stdin before accepting the full request.`));
         return;
       }
       resolve({ code, stdout, stderr });
@@ -306,7 +317,6 @@ export async function runSubscriptionJson<T>(
     const args = [
       "-p",
       "--safe-mode",
-      "--restricted",
       "--no-session-persistence",
       "--permission-mode",
       "dontAsk",
