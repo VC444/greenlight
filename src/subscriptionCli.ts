@@ -21,6 +21,8 @@ type SubscriptionFailure =
   | "structured-retries"
   | "cli-error"
   | "unsupported-option"
+  | "unsupported-schema"
+  | "authentication"
   | "timeout"
   | "output-limit"
   | "input-closed"
@@ -36,6 +38,8 @@ export class SubscriptionRequestError extends Error {
       "structured-retries": "reached its structured output retry limit",
       "cli-error": "reported a model request error",
       "unsupported-option": "rejected a CLI option; check the installed Claude Code version",
+      "unsupported-schema": "rejected the JSON schema; check compatibility with the installed Claude Code version",
+      authentication: "could not access authentication; check your gateway credentials if configured, otherwise run `claude auth login` in the terminal used to launch Greenlight",
       timeout: "timed out while generating a response",
       "output-limit": "exceeded Greenlight's response size limit",
       "input-closed": "closed stdin before accepting the full request",
@@ -85,11 +89,16 @@ export interface SubscriptionJsonRequest {
 const DEFAULT_TIMEOUT_MS = 180_000;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 
-function subscriptionEnvironment(): NodeJS.ProcessEnv {
+function claudeGatewayConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_BASE_URL?.trim() &&
+    (process.env.ANTHROPIC_AUTH_TOKEN?.trim() || process.env.ANTHROPIC_API_KEY?.trim()));
+}
+
+function subscriptionEnvironment(file: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  const gateway = file === "claude" && claudeGatewayConfigured();
   for (const name of [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
+    ...(gateway ? [] : ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]),
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_FOUNDRY",
     "CLAUDE_CODE_USE_VERTEX",
@@ -108,7 +117,7 @@ export async function runProcess(
   return new Promise((resolve, reject) => {
     const child = spawn(request.file, request.args, {
       cwd: request.cwd,
-      env: subscriptionEnvironment(),
+      env: subscriptionEnvironment(request.file),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -182,6 +191,8 @@ export async function validateSubscriptionAuth(
   backend: SubscriptionBackend,
   runner: ProcessRunner = runProcess,
 ): Promise<void> {
+  // Gateway credentials are validated by the model request, not subscription login.
+  if (backend === "claude" && claudeGatewayConfigured()) return;
   const cwd = os.tmpdir();
   let result: ProcessResult;
   try {
@@ -246,6 +257,20 @@ function claudeStructuredOutput(result: ProcessResult): unknown {
     }
     if (/unknown option|unrecognized option/i.test(result.stderr)) {
       throw new SubscriptionRequestError("claude", "unsupported-option");
+    }
+    if (/--json-schema is not a valid JSON Schema/i.test(result.stderr)) {
+      throw new SubscriptionRequestError("claude", "unsupported-schema");
+    }
+    // Inspect only failure diagnostics and emit fixed text, never CLI output.
+    const diagnostics = [
+      result.stderr,
+      typeof envelope?.result === "string" ? envelope.result : "",
+      ...(Array.isArray(envelope?.errors)
+        ? envelope.errors.filter((value): value is string => typeof value === "string")
+        : []),
+    ].join("\n");
+    if (/\bnot logged in\b/i.test(diagnostics)) {
+      throw new SubscriptionRequestError("claude", "authentication");
     }
     throw new SubscriptionRequestError(
       "claude", result.code === 0 ? "cli-error" : "exit", result.code,
@@ -382,6 +407,14 @@ export async function runSubscriptionJson<T>(
       return cleanJson(await readFile(outputFile, "utf8")) as T;
     }
 
+    // Claude 2.1.205 rejects Zod's 2020-12 dialect declaration before inference.
+    // Copy only the root so constraints and properties named $schema stay intact.
+    let claudeSchema = request.schema;
+    if (request.schema && typeof request.schema === "object" && !Array.isArray(request.schema)) {
+      const copy = { ...request.schema } as Record<string, unknown>;
+      delete copy.$schema;
+      claudeSchema = copy;
+    }
     const args = [
       "-p",
       "--safe-mode",
@@ -391,7 +424,7 @@ export async function runSubscriptionJson<T>(
       "--output-format",
       "json",
       "--json-schema",
-      JSON.stringify(request.schema),
+      JSON.stringify(claudeSchema),
       "--tools",
       imagePaths.length ? "Read" : "",
       ...modelArgs(backend),

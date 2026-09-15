@@ -69,7 +69,13 @@ Enterprise Server uses `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` when s
 otherwise Greenlight reads the GitHub CLI token for the supplied hostname.
 Public GitHub tokens are not reused for Enterprise Server hosts.
 
-Codex uses your ChatGPT subscription. Claude Code uses your Claude subscription.
+Codex uses your ChatGPT subscription. Claude Code uses your Claude subscription
+or your configured LiteLLM gateway. For a gateway, export `ANTHROPIC_BASE_URL`
+and `ANTHROPIC_AUTH_TOKEN` (or `ANTHROPIC_API_KEY`) in the environment that
+launches Claude Code. Greenlight preserves those settings and `ANTHROPIC_MODEL`
+for its Claude child process. Gateway credentials are checked by the model
+request; a Claude subscription login is not required. Settings-file-only gateway
+configuration is not supported by Greenlight's isolated Claude invocation.
 Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 
 ## Want Greenlight on all PRs? Set up the GitHub Action

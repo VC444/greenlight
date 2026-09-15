@@ -545,6 +545,79 @@ test("runs structured Codex and Claude subscription requests", async () => {
   );
 });
 
+test("Claude accepts Zod schemas without an unsupported dialect declaration", async () => {
+  const schema = z.toJSONSchema(z.object({ answer: z.string(), $schema: z.string() }));
+  const original = structuredClone(schema);
+  const expected = { answer: "ok", $schema: "ordinary property" };
+  const result = await runSubscriptionJson("claude", { prompt: "Answer", schema }, async (request) => {
+    const supplied = JSON.parse(request.args[request.args.indexOf("--json-schema") + 1]!);
+    if (supplied.$schema) {
+      return { code: 1, stdout: "", stderr: 'Error: --json-schema is not a valid JSON Schema: no schema with key or ref "https://json-schema.org/draft/2020-12/schema"' };
+    }
+    const { $schema: dialect, ...constraints } = original;
+    assert.ok(dialect);
+    assert.deepEqual(supplied, constraints);
+    return { code: 0, stdout: JSON.stringify({ structured_output: expected }), stderr: "" };
+  });
+  assert.deepEqual(result, expected);
+  assert.deepEqual(schema, original);
+});
+
+test("Claude gateway requests retain credentials and do not require subscription login", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "greenlight-gateway-"));
+  try {
+    const cli = path.join(directory, "claude");
+    writeFileSync(cli, `#!${process.execPath}
+process.stdin.resume();
+process.stdin.on("end", () => {
+  const valid = process.argv.includes("-p") &&
+    process.env.ANTHROPIC_BASE_URL === "https://gateway.example" &&
+    (process.env.ANTHROPIC_AUTH_TOKEN === "synthetic-token" ||
+      process.env.ANTHROPIC_API_KEY === "synthetic-key") &&
+    process.env.ANTHROPIC_MODEL === "gateway-model" &&
+    !process.env.CLAUDECODE && !process.env.CLAUDE_CODE_ENTRYPOINT;
+  console.log(JSON.stringify(valid
+    ? { structured_output: { ok: true } }
+    : { is_error: true, result: "Missing gateway configuration" }));
+  process.exitCode = valid ? 0 : 1;
+});
+`);
+    chmodSync(cli, 0o755);
+    const moduleUrl = new URL("./subscriptionCli.ts", import.meta.url).href;
+    const script = `
+      import assert from "node:assert/strict";
+      import { validateSubscriptionAuth, runSubscriptionJson, runProcess } from ${JSON.stringify(moduleUrl)};
+      await validateSubscriptionAuth("claude");
+      assert.deepEqual(await runSubscriptionJson("claude", {
+        prompt: "Synthetic gateway test", schema: { type: "object" },
+      }), { ok: true });
+      const otherChild = await runProcess({
+        file: process.execPath, cwd: process.cwd(),
+        args: ["-e", "process.exitCode = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 1 : 0"],
+      });
+      assert.equal(otherChild.code, 0);
+      await assert.rejects(validateSubscriptionAuth("codex", async () => ({
+        code: 1, stdout: "", stderr: "",
+      })), /codex login/);
+    `;
+    for (const credentials of [
+      { ANTHROPIC_AUTH_TOKEN: "synthetic-token", ANTHROPIC_API_KEY: undefined },
+      { ANTHROPIC_AUTH_TOKEN: undefined, ANTHROPIC_API_KEY: "synthetic-key" },
+    ]) {
+      const run = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+        encoding: "utf8", timeout: 10000,
+        env: { ...process.env, PATH: directory, ...credentials,
+          ANTHROPIC_BASE_URL: "https://gateway.example", ANTHROPIC_MODEL: "gateway-model",
+          CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli",
+        },
+      });
+      assert.equal(run.status, 0, run.stderr);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("adapts structured Stagehand calls to the subscription CLI", async () => {
   const schema = z.object({ action: z.string() });
   const query = async <T>(
@@ -943,6 +1016,10 @@ test("subprocess input is delivered normally and spawn errors reject", async () 
 test("subscription failures report safe diagnostics instead of hiding the cause", async () => {
   const request = { prompt: "private PR text", schema: { type: "object" } };
   const cases = [
+    { result: { code: 1, stdout: "", stderr: 'Error: --json-schema is not a valid JSON Schema: secret-token' }, expected: /Claude Code.*rejected.*JSON schema/ },
+    { result: { code: 1, stdout: JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "Not logged in. Please run /login. secret-token" }), stderr: "" }, expected: /Claude Code.*authentication.*claude auth login/ },
+    { result: { code: 0, stdout: JSON.stringify({ is_error: true, errors: ["Not logged in. secret-token"] }), stderr: "" }, expected: /Claude Code.*authentication.*claude auth login/ },
+    { result: { code: 1, stdout: "", stderr: "Not logged in. secret-token" }, expected: /Claude Code.*authentication.*claude auth login/ },
     { result: { code: 1, stdout: "private PR text", stderr: "secret-token" }, expected: /Claude Code.*exit code 1/ },
     { result: { code: 0, stdout: "secret-token", stderr: "" }, expected: /Claude Code.*invalid JSON/ },
     { result: { code: 0, stdout: "{}", stderr: "" }, expected: /Claude Code.*no structured output/ },
