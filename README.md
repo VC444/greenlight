@@ -17,13 +17,6 @@ Requires:
 npx skills add VC444/greenlight -g
 ```
 
-The skill launcher uses a private temporary npm cache and removes it when the
-command exits, avoiding permissions problems with `~/.npm`. Each run downloads
-its runtime again. To reuse a cache, explicitly set `npm_config_cache` or
-`NPM_CONFIG_CACHE` to a directory writable by your agent. These environment
-settings take precedence; otherwise the temporary cache overrides `.npmrc`
-cache settings. Network access is still required.
-
 ### Codex permissions
 
 Greenlight reads the supplied pull request, opens the supplied preview in
@@ -70,8 +63,8 @@ $greenlight https://github.com/owner/repo/pull/123 http://localhost:3000
 ```
 
 Local skill mode also accepts GitHub Enterprise Server PR URLs, such as
-`https://github.infra.cloudera.com/AWC/awc-core/pull/1259`. Authenticate with
-`gh auth login -h github.infra.cloudera.com` on the machine running the skill.
+`https://github.example.com/owner/repo/pull/1259`. Authenticate with
+`gh auth login -h github.example.com` on the machine running the skill.
 Enterprise Server uses `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` when set,
 otherwise Greenlight reads the GitHub CLI token for the supplied hostname.
 Public GitHub tokens are not reused for Enterprise Server hosts.
@@ -87,76 +80,21 @@ Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 
 ### Optional browser setup (local skill only)
 
-Ask Greenlight to draft your personal setup from the app's source:
+If your app needs preparation before testing, such as dismissing a welcome
+dialog or selecting a workspace, ask Greenlight to draft a setup workflow:
 
 ```text
 /greenlight init https://github.com/owner/repo
 ```
 
-In Codex, use `$greenlight init` with the same repository URL. Initialization
-reads relevant app entry routes, authentication, selection screens, and first-run
-setup source files from the default branch. It generates conditional instructions
-for the prerequisites needed to reach the app, with a visible ready condition. It saves
-`~/.greenlight/setup.md` and shows the complete draft for review. Edit that file
-directly if needed, then run your usual Greenlight check. No setup flag is needed.
-Login steps are inferred from source; credentials, MFA, and external sign-in
-requirements are flagged for manual preparation.
+In Codex, use `$greenlight init` with the same repository URL. Greenlight saves
+`~/.greenlight/setup.yaml`. Review the draft before running checks: it is
+inferred from source and has not been browser-verified. The local skill loads
+it automatically for every repository you check, so update it when switching
+apps. Running `init` again preserves your edits.
 
-An interactive terminal shows a moving three-dot animation while initializing.
-Hosts that buffer terminal output show readable progress messages instead.
-
-The draft is inferred from a bounded source inspection, not browser-verified.
-Review its assumptions before checking the app. Running `init` again displays
-your existing setup without overwriting edits. The single local setup applies
-to every repository you check, so update it when switching apps.
-
-You can also write the file yourself:
-
-Save your personal instructions in `~/.greenlight/setup.md` on the machine
-running Greenlight. The local skill reads this file automatically, with no flag
-required, regardless of the working directory. It applies to every local skill
-run. Greenlight does not look for setup instructions in the repository or PR.
-
-The file stays outside your repository and is not shared with teammates.
-Its contents are sent to your configured model backend to guide browser setup.
-
-Use conditional UI steps and an explicit ready condition. For example:
-
-```markdown
-# Browser setup
-
-After opening each check's route, inspect the welcome modal.
-If it is absent, skip the welcome steps.
-
-If the welcome modal is visible:
-1. Read its statements and select the acknowledgment checkbox.
-   Leave the checkbox selected if it is already checked.
-2. Click "Continue to console".
-3. Wait for the modal to close and the console to appear.
-
-Use the visible UI and let the app manage its localStorage entry.
-
-## Ready condition
-
-The console is visible and the welcome modal no longer blocks interaction.
-If the checkbox cannot be selected or Continue remains disabled,
-report setup as blocked.
-```
-
-Greenlight inspects the current page between setup actions, then starts the
-check only after the ready condition is satisfied. Checks share one fresh
-browser session per run, so the app's saved acknowledgment can carry between
-checks. Setup actions appear in progress updates and in the session replay
-when recording is enabled.
-
-A blocked setup skips that check's test steps and produces an inconclusive
-result labeled `Setup blocked`. Setup is limited to 12 UI actions per check.
-A missing file preserves the normal flow; an empty, unreadable, or oversized
-file stops the run. The file must be UTF-8 and at most 16,000 bytes.
-
-Setup currently applies to every check. When testing the welcome modal itself,
-temporarily remove or adjust your local recipe so setup does not dismiss the
-UI under test. The GitHub Action does not load or apply this file.
+See [Browser setup](docs/browser-setup.md) for the schema, an example, and
+execution rules.
 
 ## Want Greenlight on all PRs? Set up the GitHub Action
 

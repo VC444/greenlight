@@ -7,9 +7,9 @@ description: Initialize personal browser setup from a GitHub repository URL, or 
 
 ## Initialize personal setup
 
-For `/greenlight init <GitHub repository URL>` (or `$greenlight init` in Codex), run the runner below with `init` and the repository URL. This invocation authorizes reading the supplied repository, sending relevant source to the current model backend, and creating `~/.greenlight/setup.md` locally. Prefer a yielding terminal with TTY support for the initialization animation. If the host buffers terminal output, relay progress messages in chat as they arrive; do not promise live animation inside a static chat message.
+For `/greenlight init <GitHub repository URL>` (or `$greenlight init` in Codex), run the runner below with `init` and the repository URL. This invocation authorizes reading the supplied repository, sending relevant source to the current model backend, and creating `~/.greenlight/setup.yaml` locally. Prefer a yielding terminal with TTY support for the initialization animation. If the host buffers terminal output, relay progress messages in chat as they arrive; do not promise live animation inside a static chat message.
 
-Display the returned draft in full so the user can review it. Explain that it was inferred from code and has not been browser-verified. Point the user to the saved file location for any edits. Initialization discovers general app entry prerequisites, including login, workspace selection, and first-run dialogs. Flag any missing credentials or manual authentication requirements from the draft. Initialization preserves an existing setup file and displays it for review.
+Display the returned draft in full so the user can review it. Explain that it was inferred from code and has not been browser-verified. Point the user to the saved file location for any edits. Initialization discovers general app entry prerequisites, including login, workspace selection, and first-run dialogs. Flag any missing credentials or manual authentication requirements from the draft. Initialization preserves an existing valid YAML setup file and displays it for review. Consult `docs/browser-setup.md` in the repository for the setup schema and execution rules.
 
 ## Run checks
 

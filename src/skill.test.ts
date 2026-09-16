@@ -1,4 +1,4 @@
-import { applySetup, readSetup } from "./setup.js";
+import { applySetup, readSetup, parseSetup } from "./setup.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   existsSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -772,7 +773,7 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
     "Reading pull request changes...",
     "Planning browser checks...",
     `Plan ready: ${plan.items.length} checks.`,
-    "Looking for ~/.greenlight/setup.md...",
+    "Looking for ~/.greenlight/setup.yaml...",
     "Check 1/1: pass.",
   ]);
   assert.doesNotMatch(report, /Reading pull request changes|Check 1\/1: pass/);
@@ -975,10 +976,10 @@ test("normalizes planner and browser runner failures", async () => {
 
 
 test("routes an Enterprise PR through host-specific authentication and API", async () => {
-  const hostname = "github.infra.cloudera.com";
-  const url = `https://${hostname}/AWC/awc-core/pull/1259`;
+  const hostname = "github.example.com";
+  const url = `https://${hostname}/owner/repo/pull/1259`;
   assert.deepEqual(parsePullRequestUrl(url), {
-    hostname, owner: "AWC", repo: "awc-core", number: 1259,
+    hostname, owner: "owner", repo: "repo", number: 1259,
   });
   const routes: string[] = [];
   await runGreenlightSkill([url, "https://preview.example"], dependencies(routes, {
@@ -992,8 +993,8 @@ test("routes an Enterprise PR through host-specific authentication and API", asy
       return fakeClient(routes);
     },
     gatherContext: async (_client, job) => {
-      assert.equal(job.owner, "AWC");
-      assert.equal(job.repo, "awc-core");
+      assert.equal(job.owner, "owner");
+      assert.equal(job.repo, "repo");
       assert.equal(job.prNumber, 1259);
       return context;
     },
@@ -1003,7 +1004,7 @@ test("routes an Enterprise PR through host-specific authentication and API", asy
 });
 
 test("Enterprise credentials never fall back to public GitHub tokens", async () => {
-  const hostname = "github.infra.cloudera.com";
+  const hostname = "github.example.com";
   const env = { GH_TOKEN: "public-token", GITHUB_TOKEN: "public-fallback" };
   const command = async (file: string, args: string[]) => {
     assert.equal(file, "gh");
@@ -1015,7 +1016,7 @@ test("Enterprise credentials never fall back to public GitHub tokens", async () 
   assert.equal(await resolveGitHubToken({ ...env, GH_ENTERPRISE_TOKEN: " first ", GITHUB_ENTERPRISE_TOKEN: "second" }, shouldNotRun, hostname), "first");
   assert.equal(await resolveGitHubToken({ ...env, GITHUB_ENTERPRISE_TOKEN: " second " }, shouldNotRun, hostname), "second");
   await assert.rejects(resolveGitHubToken(env, async () => { throw new Error("secret"); }, hostname), (error: unknown) => {
-    assert.match((error as Error).message, /gh auth login -h github\.infra\.cloudera\.com/);
+    assert.match((error as Error).message, /gh auth login -h github\.example\.com/);
     assert.doesNotMatch((error as Error).message, /secret/);
     return true;
   });
@@ -1033,18 +1034,18 @@ test("the default client sends requests to the PR host's API", async (t) => {
   });
   for (const [hostname, baseUrl] of [
     ["github.com", "https://api.github.com"],
-    ["github.infra.cloudera.com", "https://github.infra.cloudera.com/api/v3"],
+    ["github.example.com", "https://github.example.com/api/v3"],
     ["example.ghe.com", "https://api.example.ghe.com"],
   ] as const) {
     urls.length = 0;
     const { createClient: _fakeClient, ...overrides } = dependencies([]);
     await runGreenlightSkill([
-      `https://${hostname}/AWC/awc-core/pull/1259`, "https://preview.example",
+      `https://${hostname}/owner/repo/pull/1259`, "https://preview.example",
     ], overrides);
     assert.deepEqual(urls, [
       `${baseUrl}/user`,
-      `${baseUrl}/repos/AWC/awc-core`,
-      `${baseUrl}/repos/AWC/awc-core/pulls/1259`,
+      `${baseUrl}/repos/owner/repo`,
+      `${baseUrl}/repos/owner/repo/pulls/1259`,
     ]);
   }
 });
@@ -1159,16 +1160,16 @@ test("model subprocess timeouts remain identifiable without raw output", async (
 test("setup loads only the default local file and validates its contents", async () => {
   const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-setup-"));
   const folder = path.join(homeDir, ".greenlight");
-  const file = path.join(folder, "setup.md");
+  const file = path.join(folder, "setup.yaml");
   try {
     assert.equal(await readSetup(homeDir), null);
     mkdirSync(folder);
-    const recipe = "# Setup\nReady when the console is visible.";
+    const recipe = structuredSetup;
     writeFileSync(file, recipe);
     assert.equal(await readSetup(homeDir), recipe);
     for (const content of ["", "x".repeat(16001), Buffer.from([255])]) {
       writeFileSync(file, content);
-      await assert.rejects(readSetup(homeDir), /setup.md/);
+      await assert.rejects(readSetup(homeDir), /setup.yaml/);
     }
     rmSync(file);
     mkdirSync(file);
@@ -1201,44 +1202,134 @@ test("skill loads local setup without a GitHub setup request or altering the tes
   })), /Could not read setup/);
 });
 
-test("setup rechecks the page after each action and skips an already ready page", async () => {
-  const actions: string[] = [];
-  const decisions = [
-    { status: "act", action: "Select the acknowledgment checkbox", reason: "Unchecked" },
-    { status: "act", action: "Click Continue to console", reason: "Checkbox selected" },
-    { status: "ready", action: "", reason: "Console visible, modal closed" },
-  ] as const;
-  let index = 0;
-  await applySetup("Dismiss welcome. Ready when console is visible.", {
-    inspect: async (prompt) => {
-      assert.match(prompt, /Dismiss welcome/);
-      if (index > 0) assert.match(prompt, /Select the acknowledgment checkbox/);
-      return decisions[index++]!;
-    },
-    act: async (action) => { actions.push(action); },
-  });
-  assert.deepEqual(actions, ["Select the acknowledgment checkbox", "Click Continue to console"]);
-  await applySetup("Ready when console is visible.", {
-    inspect: async () => decisions[2],
-    act: async () => assert.fail("ready page needs no clicks"),
-  });
+const structuredSetup = JSON.stringify({
+  version: 1,
+  steps: [{ id: "welcome", skip_if: "Console usable and welcome absent", wait_for: "Welcome visible",
+    timeout_ms: 1000, actions: ["Ensure acknowledgment is checked", "Click Continue"], verify: "Welcome closed" }],
+  ready: { condition: "Console usable", timeout_ms: 1000 },
 });
 
-test("setup stops on blocked UI, action errors, and repeated attempts", async () => {
-  await assert.rejects(applySetup("recipe", {
-    inspect: async () => ({ status: "blocked", action: "", reason: "Continue remains disabled" }),
-    act: async () => assert.fail("blocked setup must not click"),
-  }), /Setup blocked: Continue remains disabled/);
-  await assert.rejects(applySetup("recipe", {
-    inspect: async () => ({ status: "act", action: "Click Continue", reason: "Visible" }),
-    act: async () => { throw new Error("driver error"); },
-  }), /Setup blocked: Could not inspect or interact/);
-  let actions = 0;
-  await assert.rejects(applySetup("recipe", {
-    inspect: async () => ({ status: "act", action: "Click Continue", reason: "Still visible" }),
-    act: async () => { actions++; },
-  }), /12-action setup limit/);
-  assert.equal(actions, 12);
+test("setup waits for a delayed modal and resolves steps before checking readiness", async () => {
+  const events: string[] = [];
+  let welcomeInspections = 0;
+  let time = 0;
+  await applySetup(structuredSetup, {
+    inspect: async (prompt) => {
+      if (prompt.includes("Console usable and welcome absent")) return { status: "unsatisfied", reason: "Still loading" };
+      if (prompt.includes("Welcome visible")) {
+        events.push("wait");
+        return { status: ++welcomeInspections === 1 ? "unsatisfied" : "satisfied", reason: "Observed page" };
+      }
+      events.push(prompt.includes("Welcome closed") ? "verify" : "ready");
+      return { status: "satisfied", reason: "Observed condition" };
+    },
+    act: async (action) => { events.push(action); },
+  }, undefined, { now: () => time, sleep: async (ms) => { time += ms; } });
+  assert.deepEqual(events, ["wait", "wait", "Ensure acknowledgment is checked", "Click Continue", "verify", "ready"]);
+});
+
+test("setup skips only on explicit evidence and still checks final readiness", async () => {
+  const messages: string[] = [];
+  let inspections = 0;
+  await applySetup(structuredSetup, {
+    inspect: async () => { inspections++; return { status: "satisfied", reason: "Console usable; welcome absent" }; },
+    act: async () => assert.fail("already completed setup needs no clicks"),
+  }, (message) => messages.push(message));
+  assert.equal(inspections, 2);
+  assert.ok(messages.some(message => /welcome.*skipped.*Console usable/.test(message)));
+});
+
+test("unresolved setup blocks the check on timeout, uncertainty, and failed verification", async () => {
+  for (const phase of ["wait", "verify", "ready", "unknown", "action"]) {
+    let time = 0;
+    let checkStarted = false;
+    const actions: string[] = [];
+    await assert.rejects((async () => {
+      await applySetup(structuredSetup, {
+        inspect: async (prompt) => {
+          if (prompt.includes("Console usable and welcome absent")) return { status: "unsatisfied", reason: "Welcome not dismissed" };
+          if (phase === "unknown") return { status: "unknown", reason: "Cannot determine" };
+          const failed = (phase === "wait" && prompt.includes("Welcome visible")) ||
+            (phase === "verify" && prompt.includes("Welcome closed")) ||
+            (phase === "ready" && prompt.includes('"Console usable"'));
+          return { status: failed ? "unsatisfied" : "satisfied", reason: "Observed page" };
+        },
+        act: async (action) => { actions.push(action); if (phase === "action") throw new Error("Failed click"); },
+      }, undefined, { now: () => time, sleep: async (ms) => { time += ms; } });
+      checkStarted = true;
+    })(), /Setup blocked:/);
+    assert.equal(checkStarted, false);
+    assert.equal(actions.length, phase === "wait" || phase === "unknown" ? 0 : phase === "action" ? 1 : 2);
+  }
+});
+
+test("setup schema rejects ambiguity and reports field paths", () => {
+  for (const [mutate, pattern] of [
+    [(s: any) => { s.extra = true; }, /root/],
+    [(s: any) => { s.version = 2; }, /version/],
+    [(s: any) => { s.steps.push(s.steps[0]); }, /steps.1.id/],
+    [(s: any) => { s.steps[0].timeout_ms = -1; }, /steps.0.timeout_ms/],
+    [(s: any) => { s.steps[0].timeout_ms = "1000"; }, /steps.0.timeout_ms/],
+    [(s: any) => { s.steps[0].actions = []; }, /steps.0.actions/],
+    [(s: any) => { s.steps[0].verify = " "; }, /steps.0.verify/],
+    [(s: any) => { s.steps[0].optional = true; }, /steps.0/],
+    [(s: any) => { delete s.ready; }, /ready/],
+  ] as const) {
+    const setup = JSON.parse(structuredSetup);
+    mutate(setup);
+    assert.throws(() => parseSetup(JSON.stringify(setup)), pattern);
+  }
+  for (const content of ["version: 1\nversion: 1", "version: [", "---\nversion: 1\n---\nversion: 1", "a: &x {}\nb: *x"]) {
+    assert.throws(() => parseSetup(content), /invalid YAML/);
+  }
+});
+
+test("legacy setup blocks execution with migration guidance and remains untouched", async () => {
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-legacy-"));
+  try {
+    mkdirSync(path.join(homeDir, ".greenlight"));
+    const legacy = path.join(homeDir, ".greenlight/setup.md");
+    writeFileSync(legacy, "User instructions");
+    await assert.rejects(readSetup(homeDir), /Legacy.*setup.md.*setup.yaml/);
+    assert.equal(readFileSync(legacy, "utf8"), "User instructions");
+    writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), structuredSetup);
+    assert.equal(await readSetup(homeDir), structuredSetup);
+    assert.equal(readFileSync(legacy, "utf8"), "User instructions");
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+test("required steps cannot be bypassed by an early global ready decision", async () => {
+  const setup = JSON.parse(structuredSetup);
+  delete setup.steps[0].skip_if;
+  await assert.rejects(applySetup(JSON.stringify(setup), {
+    inspect: async () => ({ status: "ready", reason: "App looks ready" }) as never,
+    act: async () => assert.fail("invalid decision must block"),
+  }), /Setup blocked: welcome wait_for/);
+});
+
+test("required steps execute in order even when the app already looks ready", async () => {
+  const setup = JSON.parse(structuredSetup);
+  delete setup.steps[0].skip_if;
+  setup.steps.push({ id: "workspace", wait_for: "Workspace picker visible", timeout_ms: 1000,
+    actions: ["Select saved workspace"], verify: "Workspace selected" });
+  const events: string[] = [];
+  await applySetup(JSON.stringify(setup), {
+    inspect: async (prompt) => {
+      events.push(JSON.parse(prompt.split("\nCondition: ")[1]!));
+      return { status: "satisfied", reason: "Visible in current UI" };
+    },
+    act: async (action) => { events.push(action); },
+  });
+  assert.deepEqual(events, ["Welcome visible", "Ensure acknowledgment is checked", "Click Continue",
+    "Welcome closed", "Workspace picker visible", "Select saved workspace", "Workspace selected", "Console usable"]);
+});
+
+test("stalled observations respect the configured deadline", async () => {
+  const setup = JSON.stringify({ version: 1, steps: [], ready: { condition: "Console usable", timeout_ms: 10 } });
+  await assert.rejects(applySetup(setup, {
+    inspect: () => new Promise(() => {}),
+    act: async () => assert.fail("no actions"),
+  }), /Setup blocked: ready: observation timed out/);
 });
 
 test("init accepts repository URLs and rejects PRs, credentials, and query strings", async () => {
@@ -1265,27 +1356,26 @@ test("init generates a reviewable local draft and preserves subsequent user edit
       },
       generate: async (context) => {
         assert.equal(context.head, "abc123");
-        return { steps: ["If the welcome modal appears, click Continue to console."],
-          readyCondition: "The console is visible.", evidence: ["src/Welcome.tsx contains the continue button."],
+        return { setup: JSON.parse(structuredSetup), evidence: ["src/Welcome.tsx contains the continue button."],
           uncertainties: ["Confirm whether acknowledgment is required."] };
       },
     });
     const saved = await readSetup(homeDir);
-    assert.match(saved!, /Continue to console/);
+    assert.match(saved!, /Click Continue/);
     assert.match(report, /not browser-verified/);
     assert.match(report, /Confirm whether acknowledgment/);
     assert.match(report, /Edit this file directly/);
     assert.doesNotMatch(report, /Tell me what you would like to change/);
     assert.ok(report.includes(saved!));
     assert.equal(messages.length, 3);
-    writeFileSync(path.join(homeDir, ".greenlight/setup.md"), "My personal edits");
+    writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), "# My personal edits\n" + structuredSetup);
     const repeat = await runGreenlightInit("https://github.com/owner/repo", () => {}, {
       homeDir, context: async () => assert.fail("existing setup needs no remote access"),
       generate: async () => assert.fail("must preserve existing setup"),
     });
     assert.match(repeat, /My personal edits/);
     assert.match(repeat, /Edit this file directly/);
-    assert.equal(await readSetup(homeDir), "My personal edits");
+    assert.equal(await readSetup(homeDir), "# My personal edits\n" + structuredSetup);
   } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
@@ -1298,9 +1388,9 @@ test("init writes nothing when generation fails and refuses to overwrite a racin
       generate: async () => ({ steps: [] }),
     }));
     assert.equal(await readSetup(homeDir), null);
-    await saveInitialSetup("First writer", homeDir);
-    await assert.rejects(saveInitialSetup("Second writer", homeDir), /EEXIST/);
-    assert.equal(await readSetup(homeDir), "First writer");
+    await saveInitialSetup("# First writer\n" + structuredSetup, homeDir);
+    await assert.rejects(saveInitialSetup("# Second writer\n" + structuredSetup, homeDir), /EEXIST/);
+    assert.equal(await readSetup(homeDir), "# First writer\n" + structuredSetup);
   } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
@@ -1338,7 +1428,7 @@ test("CLI dispatches init and shows existing setup with readable non-TTY progres
   const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
   try {
     mkdirSync(path.join(homeDir, ".greenlight"));
-    writeFileSync(path.join(homeDir, ".greenlight/setup.md"), "# My saved setup\nReady when console is visible.");
+    writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), "# My saved setup\n" + structuredSetup);
     const result = spawnSync(process.execPath, ["bin/greenlight.mjs", "init", "https://github.com/owner/repo"], {
       cwd: process.cwd(), env: { ...process.env, HOME: homeDir, GREENLIGHT_LOCAL_AGENT: "claude" },
       encoding: "utf8", timeout: 20_000,

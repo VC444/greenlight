@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { Octokit } from "@octokit/core";
 import { z } from "zod";
+import { stringify } from "yaml";
 import { gitHubApiUrl, parsePullRequestUrl, resolveGitHubToken } from "./skill.js";
-import { readSetup } from "./setup.js";
+import { readSetup, SetupSchema, parseSetup } from "./setup.js";
 import { runSubscriptionJson, subscriptionBackend, validateSubscriptionAuth } from "./subscriptionCli.js";
 
 export function parseRepositoryUrl(raw: string) {
@@ -17,11 +18,10 @@ export function parseRepositoryUrl(raw: string) {
   return target;
 }
 
-export const InitDraftSchema = z.object({
-  steps: z.array(z.string()).max(12).describe("Conditional UI steps supported by the supplied code, in execution order; empty if no setup is evident"),
-  readyCondition: z.string().min(1).describe("Observable UI condition supported by the code that means setup is complete"),
+export const InitDraftSchema = z.strictObject({
+  setup: SetupSchema,
   evidence: z.array(z.string()).describe("Source file paths and brief explanations supporting the instructions"),
-  uncertainties: z.array(z.string()).describe("Assumptions or missing context for the user to review"),
+  uncertainties: z.array(z.string()).describe("Assumptions, proposed deadlines, or missing context for the user to review"),
 });
 
 export async function gatherSetupContext(client: Octokit, target: ReturnType<typeof parseRepositoryUrl>) {
@@ -55,21 +55,19 @@ export async function gatherSetupContext(client: Octokit, target: ReturnType<typ
 }
 
 function renderDraft(draft: z.infer<typeof InitDraftSchema>, repository: string, head: string): string {
-  return `# Browser setup\n\nRepository: ${repository}\nSource revision: ${head}\n\n` +
-    "Generated from source code. Review before running checks; not browser-verified.\n\n" +
-    "## Steps\n\nApply after opening each check's route. Skip conditional steps when their UI is absent.\n" +
-    "Use visible UI and let the app manage its own storage.\n\n" +
-    (draft.steps.length ? draft.steps.map((step, i) => `${i + 1}. ${step}`).join("\n") : "No initial setup steps were identified in the inspected source.") +
-    `\n\n## Ready condition\n\n${draft.readyCondition}\n\n` +
-    "If setup cannot reach this condition, report setup blocked and skip the check.\n\n" +
-    "## Evidence\n\n" + draft.evidence.map((item) => `- ${item}`).join("\n") +
-    "\n\n## Review notes\n\n" + (draft.uncertainties.length ? draft.uncertainties.map((item) => `- ${item}`).join("\n") : "- Verify the labels and ready condition against your app.") + "\n";
+  const comments = [
+    "Browser setup", `Repository: ${repository}`, `Source revision: ${head}`,
+    "Generated from source code. Review before running checks; not browser-verified.",
+    "Evidence:", ...draft.evidence, "Review notes:", ...draft.uncertainties,
+  ];
+  return comments.flatMap(line => line.split(/\r?\n/)).map(line => `# ${line}\n`).join("") + stringify(draft.setup);
 }
 
 export async function saveInitialSetup(content: string, homeDir = os.homedir()): Promise<string> {
+  parseSetup(content);
   const folder = path.join(homeDir, ".greenlight");
   await mkdir(folder, { recursive: true, mode: 0o700 });
-  const destination = path.join(folder, "setup.md");
+  const destination = path.join(folder, "setup.yaml");
   const file = await open(destination, "wx", 0o600);
   try { await file.writeFile(content, "utf8"); } finally { await file.close(); }
   return destination;
@@ -85,10 +83,10 @@ export async function runGreenlightInit(repository: string, progress: (message: 
   overrides: Partial<InitDependencies> = {}): Promise<string> {
   const target = parseRepositoryUrl(repository);
   const homeDir = overrides.homeDir ?? os.homedir();
-  const destination = path.join(homeDir, ".greenlight", "setup.md");
+  const destination = path.join(homeDir, ".greenlight", "setup.yaml");
   const existing = await readSetup(homeDir);
   if (existing !== null) {
-    return `## Your existing Greenlight setup\n\nSaved at ${destination}. Kept your edits unchanged.\n\n${existing}\n\nEdit this file directly if you need to change the setup.`;
+    return `## Your existing Greenlight setup\n\nSaved at ${destination}. Kept your edits unchanged.\n\n\`\`\`yaml\n${existing}\n\`\`\`\n\nEdit this file directly if you need to change the setup.`;
   }
   progress("Reading your app's entry screens...");
   const context = await (overrides.context ?? (async (repo) => {
@@ -110,7 +108,12 @@ export async function runGreenlightInit(repository: string, progress: (message: 
         "Skip login when already signed in. Describe source-supported login UI steps, but report setup blocked " +
         "when credentials, MFA, external identity-provider navigation, or other manual authentication is needed. " +
         "List these requirements in uncertainties so the user can prepare access. " +
-        "Preserve exact UI labels. Make optional steps conditional " +
+        "Return a version 1 structured setup. Each step needs a unique id, wait_for, timeout_ms, " +
+        "an ordered list of individual unconditional actions, and a verify postcondition. " +
+        "Use skip_if only for positive visible evidence that a step is already complete; otherwise use null. " +
+        "Absence of a dialog alone is insufficient evidence. Supply a final ready condition. " +
+        "Propose explicit deadlines in milliseconds and flag them for user review in uncertainties. " +
+        "Preserve exact UI labels. Make actions unconditional " +
         "and checkbox actions idempotent. Never invent login credentials, accept legal terms or pick consent " +
         "preferences not specified by the user. If a choice needs user input, say to report setup blocked and " +
         "list the decision in uncertainties. Provide a concrete visible ready condition. This is a partial " +
@@ -125,5 +128,5 @@ export async function runGreenlightInit(repository: string, progress: (message: 
   if (Buffer.byteLength(content) > 16_000) throw new Error("Generated setup is too long. No setup file was written.");
   progress("Saving your editable setup...");
   await saveInitialSetup(content, homeDir);
-  return `## Greenlight setup is ready to review\n\nSaved at ${destination}. Future local checks load it automatically.\n\n${content}\nEdit this file directly if needed, then run /greenlight <PR URL> <preview URL>.`;
+  return `## Greenlight setup is ready to review\n\nSaved at ${destination}. Future local checks load it automatically.\n\n\`\`\`yaml\n${content}\`\`\`\n\nEdit this file directly if needed, then run /greenlight <PR URL> <preview URL>.`;
 }

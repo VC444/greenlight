@@ -44,6 +44,9 @@ importers:
       tsx:
         specifier: ^4.23.1
         version: 4.23.1
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1451,6 +1454,11 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
 
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
@@ -2894,6 +2902,8 @@ snapshots:
   ws@8.21.1(bufferutil@4.1.0):
     optionalDependencies:
       bufferutil: 4.1.0
+
+  yaml@2.9.1: {}
 
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
