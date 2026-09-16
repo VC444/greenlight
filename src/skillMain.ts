@@ -12,7 +12,6 @@ try {
   }
   const input = process.argv.slice(2);
   const initializing = input[0] === "init";
-  if (initializing && input.length !== 2) throw new Error("Usage: greenlight init <GitHub repository URL>");
   const options = initializing ? { args: input, replayDir: "" } : parseLocalSkillOptions(input);
   process.env.GREENLIGHT_REPLAY_DIR = options.replayDir;
   const { runGreenlightSkill } = await import("./skill.js");
@@ -28,7 +27,7 @@ try {
     if (animated) process.stderr.write("\r\x1b[2K");
     console.error(`[Greenlight progress] ${currentStage}`);
   };
-  onProgress(initializing ? "Getting to know your app..." : currentStage);
+  onProgress(initializing ? "Preparing browser setup..." : currentStage);
   const animation = animated ? setInterval(draw, 180) : undefined;
   animation?.unref();
   const heartbeat = setInterval(() => {
@@ -41,7 +40,7 @@ try {
   heartbeat.unref();
   try {
     const report = initializing
-      ? await (await import("./init.js")).runGreenlightInit(input[1]!, onProgress)
+      ? await (await import("./init.js")).runGreenlightInit(input[1], input.slice(2).join(" "), onProgress)
       : await runGreenlightSkill(options.args, { onProgress });
     if (animation) { clearInterval(animation); process.stderr.write("\r\x1b[2K"); }
     console.log(report);
