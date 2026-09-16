@@ -73,4 +73,16 @@ if [[ -z "$npx_bin" ]]; then
 fi
 
 runtime_package="${GREENLIGHT_RUNTIME_PACKAGE:-github:VC444/greenlight#main}"
-exec "$npx_bin" --yes --package "$runtime_package" greenlight "$@"
+if [[ -n "${npm_config_cache:-}${NPM_CONFIG_CACHE:-}" ]]; then
+  exec "$npx_bin" --yes --package "$runtime_package" greenlight "$@"
+fi
+
+# Agent sandboxes may block the home cache even when its ownership is correct.
+# Use a private directory and keep it alive until the downloaded runtime exits.
+if ! runtime_cache="$(mktemp -d "${TMPDIR:-/tmp}/greenlight-npm-XXXXXX")"; then
+  echo "Greenlight: could not create its temporary npm cache. Set TMPDIR to a writable directory or set npm_config_cache." >&2
+  exit 1
+fi
+trap 'rm -rf -- "$runtime_cache"' EXIT
+export npm_config_cache="$runtime_cache"
+"$npx_bin" --yes --package "$runtime_package" greenlight "$@"

@@ -17,6 +17,13 @@ Requires:
 npx skills add VC444/greenlight -g
 ```
 
+The skill launcher uses a private temporary npm cache and removes it when the
+command exits, avoiding permissions problems with `~/.npm`. Each run downloads
+its runtime again. To reuse a cache, explicitly set `npm_config_cache` or
+`NPM_CONFIG_CACHE` to a directory writable by your agent. These environment
+settings take precedence; otherwise the temporary cache overrides `.npmrc`
+cache settings. Network access is still required.
+
 ### Codex permissions
 
 Greenlight reads the supplied pull request, opens the supplied preview in

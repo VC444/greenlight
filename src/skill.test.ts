@@ -5,6 +5,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  existsSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -178,6 +179,57 @@ test("skill runner exposes companion CLI directories to Node", () => {
     assert.equal(run.status, 0);
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test("skill runner isolates npm cache, cleans up on failure, and honors cache overrides", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "greenlight-cache-test-"));
+  const fakeNpx = path.join(root, "npx");
+  writeFileSync(fakeNpx, [
+    "#!/usr/bin/env bash",
+    'cache="${npm_config_cache:-${NPM_CONFIG_CACHE:-$HOME/.npm}}"',
+    'mkdir -p "$cache/_cacache/tmp" "$cache/_logs" || exit 90',
+    'probe=$(mktemp -d "$cache/_cacache/tmp/git-cloneXXXXXX") || exit 91',
+    'rmdir "$probe"',
+    'echo "$cache"',
+    'exit "${NPX_EXIT_CODE:-0}"',
+    "",
+  ].join("\n"));
+  chmodSync(fakeNpx, 0o755);
+  // A file at the default cache path deterministically makes it unusable.
+  writeFileSync(path.join(root, ".npm"), "unusable cache");
+  const temp = path.join(root, "temporary files");
+  mkdirSync(temp);
+  const run = (extra: Record<string, string> = {}) => spawnSync("/bin/bash", [
+    path.resolve("skills/greenlight/scripts/run-greenlight.sh"), "init", "https://github.com/owner/repo",
+  ], {
+    encoding: "utf8",
+    env: {
+      HOME: root, TMPDIR: temp, PATH: "/usr/bin:/bin",
+      CODEX_SESSION_ID: "test-session",
+      GREENLIGHT_NODE_PATH: process.execPath,
+      GREENLIGHT_NPX_PATH: fakeNpx,
+      ...extra,
+    },
+  });
+  try {
+    for (const code of [0, 42]) {
+      const result = run({ NPX_EXIT_CODE: String(code) });
+      assert.equal(result.status, code, result.stderr);
+      const cache = result.stdout.trim();
+      assert.equal(path.dirname(cache), temp);
+      assert.match(path.basename(cache), /^greenlight-npm-/);
+      assert.equal(existsSync(cache), false, "temporary cache must be cleaned up");
+    }
+    for (const key of ["npm_config_cache", "NPM_CONFIG_CACHE"]) {
+      const cache = path.join(root, key);
+      const result = run({ [key]: cache });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), cache);
+      assert.equal(existsSync(cache), true, "user cache must be preserved");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
