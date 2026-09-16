@@ -1,92 +1,104 @@
 # Browser setup
 
-Describe what needs to happen before testing. Greenlight writes and verifies a
-small Playwright hook for you. You do not need to write code.
+The local skill can apply a personal setup workflow before each check, such as
+dismissing a welcome dialog or selecting a workspace. The GitHub Action does
+not load or apply this workflow.
 
-## Create setup
+## Create and review setup
 
-```text
-/greenlight init https://preview.example.com "Tick the acknowledgment checkbox and click Continue."
+Run `/greenlight init https://github.com/owner/repo` in Claude Code, or
+`$greenlight init https://github.com/owner/repo` in Codex. Greenlight reads a
+bounded selection of app entry routes and prerequisite source files from the
+default branch, then saves a draft to `~/.greenlight/setup.yaml`.
+
+The draft is inferred from source, not browser-verified. Review the actions,
+conditions, deadlines, and assumptions before running checks. Credentials,
+MFA, and external sign-in requirements need manual preparation. Running
+`init` again displays your existing valid setup without overwriting edits.
+You can also write the file yourself using the schema below.
+
+The local skill reads this file automatically, regardless of the working
+directory. One setup applies to every repository you check, so update it when
+switching apps. The file stays outside your repository and is not shared with
+teammates. Its contents are sent to your configured model backend for setup.
+
+## Schema
+
+Use version 1. Each step has a unique ID, a prerequisite, ordered actions, and
+a postcondition. Conditions describe observable UI states; actions describe
+individual unconditional UI interactions.
+
+```yaml
+version: 1
+steps:
+  - id: dismiss-welcome
+    skip_if: >
+      The console navigation is visible and usable,
+      and the welcome dialog is absent.
+    wait_for: >
+      The welcome dialog containing
+      "I acknowledge the above statements." is visible.
+    timeout_ms: 10000
+    actions:
+      - Ensure "I acknowledge the above statements." is checked.
+      - Click "Continue to Console".
+    verify: >
+      The welcome dialog is absent and
+      the console navigation is visible and usable.
+ready:
+  condition: >
+    The console navigation is visible and usable,
+    with no dialog blocking interaction.
+  timeout_ms: 10000
 ```
 
-In Codex, use `$greenlight init` with the same preview URL and instructions.
-If you omit the instructions, the skill asks what needs to happen before
-Greenlight can test the app. No repository URL is needed.
+| Field | Meaning |
+| --- | --- |
+| `version` | Must be `1`. |
+| `steps` | Ordered setup steps; may be empty when only readiness needs checking. |
+| `steps[].id` | Unique identifier using letters, digits, underscores, or hyphens. |
+| `steps[].skip_if` | Optional positive evidence that this step is already complete. Omit or use `null` for a required step. |
+| `steps[].wait_for` | Visible prerequisite for executing the actions. |
+| `steps[].timeout_ms` | Deadline applied separately to the skip observation, prerequisite, and postcondition. |
+| `steps[].actions` | Nonempty list of individual UI actions executed in order. |
+| `steps[].verify` | Visible postcondition required after all actions. |
+| `ready.condition` | Final observable condition required before testing begins. |
+| `ready.timeout_ms` | Deadline for the final readiness check. |
 
-Greenlight opens the preview in fresh local Chrome, reads the visible UI's
-accessibility snapshot, and generates only the actions you requested. It runs
-the candidate, checks the resulting UI against your instructions, and verifies
-that the hook also works on the prepared page and after a reload. Later screens
-can inform a revised candidate. Generation stops after six model responses if
-it cannot verify the workflow.
+Choose conditions and deadlines appropriate for your app. An absent dialog
+alone is insufficient evidence for `skip_if`; describe the usable app state
+that confirms the step is already complete. Express waits in conditions and
+make checkbox actions idempotent, such as ensuring a checkbox is selected.
 
-Only a successfully verified hook is saved to `~/.greenlight/setup.ts`. A failed
-attempt leaves your previous hook unchanged. Missing credentials, inaccessible
-previews, and unspecified choices are reported so you can provide the missing
-information. Setup does not inherit your everyday browser's signed-in session.
+Deadlines must be integers from 1 to 300000 milliseconds. Each deadline
+includes model observation time. UI actions use the browser driver's action
+timeout.
 
-Initialization uses your current agent subscription. Your instructions, existing
-hook, and preview accessibility snapshots are sent to that backend. It does not
-scan repository files or invent unrelated login or onboarding steps.
+## Execution and failures
 
-## Change setup with a prompt
+For each step, Greenlight evaluates `skip_if` once, if provided. It skips only
+when that condition is positively verified. Otherwise it waits for
+`wait_for`, executes each action in order, and waits for `verify`. Unsatisfied
+or uncertain conditions are retried until their deadline. After every step
+has completed or been explicitly skipped, Greenlight evaluates `ready`.
+Natural-language conditions depend on model interpretation of visible UI.
 
-```text
-/greenlight init https://preview.example.com "Also select the demo workspace after continuing."
-```
-
-Greenlight uses the existing hook and the new instructions to generate and
-verify a replacement. To remove a behavior, say so in the instructions. You do
-not need to edit the saved file yourself.
-
-One personal hook applies to every local check, regardless of repository or
-working directory. When switching apps, explicitly ask to replace the old setup
-with the new app's prerequisites. The GitHub Action does not load this file.
-
-## Execution
-
-For each check, Greenlight navigates to the check's route, runs the saved hook
-on that exact browser tab, then starts the generated test steps. Checks share
-one browser session, so hooks must handle already-completed setup. There are
-no model calls for setup during checks. Setup UI interactions appear in the
+A failed action, observation error, or expired deadline prevents that check's
+test steps from starting. The result is inconclusive and labeled
+`Setup blocked`. Progress logs identify steps, skips and their evidence,
+condition verification, and failures. Setup actions appear in the session
 replay when recording is enabled.
 
-An exception or the 30-second setup deadline marks the check inconclusive with
-`Setup blocked` and stops the remaining checks. On timeout, Greenlight closes
-the page to cancel pending actions. Run `init` with updated instructions to fix
-a hook when the app's UI changes.
+Checks share one fresh browser session per run, so saved app state can carry
+between checks. When testing the welcome modal itself, temporarily remove or
+adjust the recipe so setup does not dismiss the UI under test.
 
-A missing hook preserves the normal flow. An empty, unreadable, oversized, or
-invalid hook blocks execution. Existing `setup.yaml` and `setup.md` files are
-not executed or silently ignored: run `init` with the preview and setup
-instructions to migrate. The original files remain untouched; the new verified
-Playwright hook takes precedence.
+## Validation
 
-## Saved hook format
+The file must be UTF-8 and at most 16000 bytes. It accepts up to 12 steps with
+1 to 12 actions each. Unknown fields, duplicate keys or step IDs, unsupported
+versions, blank conditions, and missing required fields are rejected before
+browser execution. YAML aliases and multiple documents are not supported.
 
-This is a small async function using Playwright locators, not a Playwright Test
-suite. Greenlight owns the browser and provides `page`. For example, a generated
-hook could look like this when these labels are observed in the preview:
-
-```ts
-export default async function setup({ page }) {
-  const dialog = page.getByRole("dialog", { name: "Welcome" });
-  const ready = page.getByRole("navigation", { name: "Console" });
-  await dialog.or(ready).first().waitFor({ state: "visible" });
-  if (await dialog.isVisible()) {
-    await dialog.getByRole("checkbox", { name: "I acknowledge" }).check();
-    await dialog.getByRole("button", { name: "Continue", exact: true }).click();
-  }
-  await ready.waitFor({ state: "visible" });
-}
-```
-
-The `.ts` file uses JavaScript-compatible syntax. Hooks support `const`, `if`,
-`return`, locator composition, awaited UI actions, and explicit readiness waits.
-Imports, helper functions, loops, `test()` fixtures, page evaluation, direct
-network/storage access, and browser lifecycle operations are rejected. All UI
-actions must be awaited. Hooks are limited to 8000 bytes and 100 lines; most
-setups should need only a few lines per requested action.
-
-Verification demonstrates the observed preview states, not every future route
-or UI change. Include any route-specific prerequisites in your instructions.
+A missing setup file preserves the normal flow. An empty, invalid, unreadable,
+or oversized file stops the run.

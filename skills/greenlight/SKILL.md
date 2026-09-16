@@ -1,20 +1,15 @@
 ---
 name: greenlight
-description: Create or update Playwright browser setup from a preview URL and user instructions, or run Greenlight checks for a pull request and preview URL using the current agent subscription.
+description: Initialize personal browser setup from a GitHub repository URL, or run Greenlight checks for a pull request and preview URL using the current agent subscription.
 ---
 
 # Greenlight
 
 ## Initialize personal setup
 
-For `/greenlight init <preview URL> "<setup instructions>"` (or `$greenlight init` in Codex), use this flow:
+For `/greenlight init <GitHub repository URL>` (or `$greenlight init` in Codex), run the runner below with `init` and the repository URL. This invocation authorizes reading the supplied repository, sending relevant source to the current model backend, and creating `~/.greenlight/setup.yaml` locally. Prefer a yielding terminal with TTY support for the initialization animation. If the host buffers terminal output, relay progress messages in chat as they arrive; do not promise live animation inside a static chat message.
 
-1. If the preview URL or instructions are missing, ask for the missing information. For missing instructions, ask: "What needs to happen before Greenlight can test this app?" Do not infer prerequisites from the repository.
-2. Run the runner below with `init`, the supplied preview URL, and the user's instructions as a single argument. Quote arguments safely so instruction text cannot become shell code. This invocation authorizes preview access, local Chrome control, sending the requested setup and preview accessibility snapshots to the current subscription, and saving the verified hook locally.
-3. Relay progress while the runner inspects the UI, generates a small Playwright hook, and verifies it in the browser. The runner saves only verified setup to `~/.greenlight/setup.ts`.
-4. Report the result. If setup needs a user choice or access, ask for the specific missing information and rerun with the clarified instructions. Do not ask the user to write code.
-
-Follow-up prompts such as "also select the demo workspace" update the existing hook. Reuse the supplied preview URL when it is clear from the conversation, and run `init` again with the new instructions. Failed verification preserves the previous hook. Do not add unrelated login, consent, onboarding, or app prerequisites. Old YAML and Markdown setup files are preserved but no longer executed. Consult `docs/browser-setup.md` for execution rules and migration.
+Display the returned draft in full so the user can review it. Explain that it was inferred from code and has not been browser-verified. Point the user to the saved file location for any edits. Initialization discovers general app entry prerequisites, including login, workspace selection, and first-run dialogs. Flag any missing credentials or manual authentication requirements from the draft. Initialization preserves an existing valid YAML setup file and displays it for review. Consult `docs/browser-setup.md` in the repository for the setup schema and execution rules.
 
 ## Run checks
 

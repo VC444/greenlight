@@ -80,25 +80,21 @@ Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 
 ### Optional browser setup (local skill only)
 
-If your app needs preparation before testing, describe it with the preview URL:
+If your app needs preparation before testing, such as dismissing a welcome
+dialog or selecting a workspace, ask Greenlight to draft a setup workflow:
 
 ```text
-/greenlight init https://preview.example.com "Tick the acknowledgment checkbox and click Continue."
+/greenlight init https://github.com/owner/repo
 ```
 
-In Codex, use `$greenlight init` with the same preview URL and instructions.
-Greenlight inspects the preview, writes a minimal Playwright hook, runs it to
-verify the requested outcome, and saves it to `~/.greenlight/setup.ts`. You do
-not need to write code. No repository scan or inferred onboarding workflow is
-involved. Omit the instructions and the skill asks what needs preparing.
+In Codex, use `$greenlight init` with the same repository URL. Greenlight saves
+`~/.greenlight/setup.yaml`. Review the draft before running checks: it is
+inferred from source and has not been browser-verified. The local skill loads
+it automatically for every repository you check, so update it when switching
+apps. Running `init` again preserves your edits.
 
-Future local checks run the hook automatically before each check. To change
-it, run `init` again with new instructions, such as "Also select the demo
-workspace." Failed verification preserves your previous setup. One personal
-hook applies across repositories, so replace it when switching apps.
-
-See [Browser setup](docs/browser-setup.md) for prompt examples, verification,
-execution rules, and migration from old setup files.
+See [Browser setup](docs/browser-setup.md) for the schema, an example, and
+execution rules.
 
 ## Want Greenlight on all PRs? Set up the GitHub Action
 

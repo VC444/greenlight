@@ -1,7 +1,7 @@
 interface:
   display_name: "Greenlight"
   short_description: "Initialize browser setup or test a PR"
-  default_prompt: "Use $greenlight init with a preview URL and setup instructions to create or update a verified Playwright hook, or $greenlight with a PR URL and preview URL to run checks."
+  default_prompt: "Use $greenlight init with a repository URL to draft local setup, or $greenlight with a PR URL and preview URL to run checks."
 
 policy:
   allow_implicit_invocation: false

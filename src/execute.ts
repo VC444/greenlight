@@ -1,6 +1,5 @@
 import "dotenv/config";
-import { applySetup, SetupBlockedError } from "./setup.js";
-import { chromium, type Page as PlaywrightPage } from "playwright-core";
+import { applySetup, SetupBlockedError, SetupDecisionSchema } from "./setup.js";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { generateText, Output } from "ai";
 import { z } from "zod";
@@ -232,16 +231,13 @@ export async function runPlan(
     await page.addInitScript(DIALOG_SUPPRESS);
     if (isRecording()) await page.addInitScript(recorderInitScript());
 
-    const playwright = setup ? await chromium.connectOverCDP(stagehand.connectURL()) : null;
-    const setupPage = playwright ? await findSetupPage(playwright, page.targetId()) : undefined;
-
     const items: ItemEvidence[] = [];
     const recordings: ItemRecording[] = [];
     for (const [index, item] of plan.items.entries()) {
       const label = `Check ${index + 1}/${plan.items.length}`;
       onProgress?.(`${label}: ${item.intent}`);
       const evidence = await runItem(stagehand, page, previewUrl, item, visualJudge,
-        onProgress ? (message) => onProgress(`${label}: ${message}`) : undefined, setup, setupPage);
+        onProgress ? (message) => onProgress(`${label}: ${message}`) : undefined, setup);
       items.push(evidence);
       onProgress?.(`${label}: ${evidence.error?.startsWith("Setup blocked:") ? "setup blocked" : evidence.error ? "uncertain (execution error)" : evidence.verdict}.`);
       // Drained per item, not per run: the recorder restarts on every full page
@@ -252,13 +248,6 @@ export async function runPlan(
         const events = await drainEvents(page);
         dbg(`drained ${events.length} events in ${Date.now() - t}ms`);
         recordings.push({ intent: item.intent, route: item.route, events });
-      }
-      if (evidence.error?.startsWith("Setup blocked:")) {
-        for (const skipped of plan.items.slice(index + 1)) {
-          items.push({ intent: skipped.intent, route: skipped.route, verdict: "uncertain",
-            reasoning: "", consoleErrors: [], error: "Setup blocked: not run because an earlier setup failed." });
-        }
-        break;
       }
     }
     if (isRecording()) onProgress?.("Saving replay...");
@@ -375,7 +364,6 @@ async function runItem(
   visualJudge: ActiveVisualJudge | null,
   onProgress?: (message: string) => void,
   setup?: string,
-  setupPage?: PlaywrightPage,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
   const onConsole = (m: { type(): string; text(): string }) => {
@@ -410,8 +398,13 @@ async function runItem(
     dbg(`asset settle ended after ${Date.now() - t}ms; page: ${await pageState(page)}`);
 
     if (setup) {
-      if (!setupPage) throw new SetupBlockedError("Could not attach Playwright to the check page.");
-      await applySetup(setup, setupPage, onProgress);
+      await applySetup(setup, {
+        inspect: (prompt) => stagehand.extract(prompt, SetupDecisionSchema),
+        act: async (instruction) => {
+          const outcome = await stagehand.act(instruction);
+          if (!outcome.success) throw new SetupBlockedError("The requested UI action could not be completed.");
+        },
+      }, onProgress);
     }
 
     // Perform each natural-language step. A step the model can't do (act throws)
@@ -495,18 +488,4 @@ async function runItem(
     consoleErrors,
     error,
   };
-}
-
-// Match the CDP target, since selecting the first tab can prepare a different page.
-export async function findSetupPage(browser: import("playwright-core").Browser, targetId: string): Promise<PlaywrightPage> {
-  for (const context of browser.contexts()) {
-    for (const page of context.pages()) {
-      const session = await context.newCDPSession(page);
-      try {
-        const { targetInfo } = await session.send("Target.getTargetInfo");
-        if (targetInfo.targetId === targetId) return page;
-      } finally { await session.detach(); }
-    }
-  }
-  throw new SetupBlockedError("Could not find the check's browser tab.");
 }
