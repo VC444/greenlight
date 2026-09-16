@@ -781,6 +781,9 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
   assert.ok(routes.length > 0);
   assert.ok(routes.every((route) => route.startsWith("GET ")));
   assert.match(report, /### 🎄 Greenlight Results:/);
+  assert.ok(report.includes(`\n\n${plan.summary}\n\n**1 passed**`));
+  assert.match(report, /Ran against the preview for PR commit/);
+  assert.doesNotMatch(report, /Vercel/);
   assert.match(report, /1 passed/);
   assert.match(report, /Greenlight reports locally/);
   assert.doesNotMatch(report, /<\/?sub>/);

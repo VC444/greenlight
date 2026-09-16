@@ -31,7 +31,11 @@ const TestPlanItemSchema = z.object({
 });
 
 const TestPlanSchema = z.object({
-  summary: z.string().describe("One sentence: what this PR is trying to do"),
+  summary: z.string().describe(
+    "One concise sentence from a product manager's perspective: the user problem, " +
+      "intended behavior change, and benefit supported by the PR. Use plain language; " +
+      "avoid implementation details and invented business outcomes.",
+  ),
   confidence: z
     .enum(["high", "low"])
     .describe(
@@ -44,9 +48,10 @@ const TestPlanSchema = z.object({
 
 export type TestPlan = z.infer<typeof TestPlanSchema>;
 
-const SYSTEM_PROMPT = `You are Greenlight, an automated PR test bot for Next.js apps deployed on Vercel. Given a pull request's intent signals (title, description, linked issue, commit messages) and its diff with surrounding code, produce a test plan that verifies the intended user-visible behavior on the PR's Vercel preview deployment.
+const SYSTEM_PROMPT = `You are Greenlight, an automated PR test bot for web apps. Given a pull request's intent signals (title, description, linked issue, commit messages) and its diff with surrounding code, produce a test plan that verifies the intended user-visible behavior on the supplied preview, regardless of its hosting provider.
 
 Rules:
+- Write the summary from a product manager's perspective in one concise, plain-language sentence: explain the user problem, what changes for users, and the intended benefit where supported by the PR. Describe intent, not a verified outcome. For internal changes, describe their purpose without inventing user or business impact.
 - Ground every item in evidence from the PR. Test what the change is *for*, not everything the app does. Never invent features that aren't in the diff or description.
 - Only propose tests a browser can execute against a deployed preview: navigate, click, type, submit, and observe rendered output. No unit tests, no direct API assertions, no access to the codebase at runtime.
 - Routes come from the Next.js file layout (app/ or pages/ directories) visible in the changed file paths and contents. A route is only where a journey *starts*.

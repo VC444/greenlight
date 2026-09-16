@@ -203,6 +203,8 @@ export function renderResultsComment(
   const lines = [
     `### 🎄 Greenlight Results:`,
     "",
+    plan.summary,
+    "",
     `**${headline(t)}** across ${t.total} check(s).`,
     "",
     renderItems(result.items),
@@ -214,7 +216,7 @@ export function renderResultsComment(
     surface === "local"
       ? "Greenlight reports locally; it does not change or gate the pull request"
       : "❌ and ❔ never fail the check run: Greenlight reports, it doesn't gate the merge";
-  const footer = `Ran against the Vercel preview for \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ${safety}`;
+  const footer = `Ran against the preview for PR commit \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ${safety}`;
   lines.push("", surface === "local" ? footer : `<sub>${footer}</sub>`);
   return lines.join("\n");
 }
