@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { applySetup, SetupBlockedError, SetupDecisionSchema } from "./setup.js";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { generateText, Output } from "ai";
 import { z } from "zod";
@@ -165,6 +166,8 @@ export function canExecute(): boolean {
 export async function runPlan(
   previewUrl: string,
   plan: TestPlan,
+  onProgress?: (message: string) => void,
+  setup?: string,
 ): Promise<ExecutionResult | null> {
   const localBackend = subscriptionBackend();
   const spec = localBackend ? null : executorModelSpec();
@@ -205,6 +208,7 @@ export async function runPlan(
   });
 
   try {
+    onProgress?.("Starting Chrome...");
     await stagehand.init();
     const modelLabel = localBackend
       ? `${localBackend} subscription`
@@ -229,8 +233,13 @@ export async function runPlan(
 
     const items: ItemEvidence[] = [];
     const recordings: ItemRecording[] = [];
-    for (const item of plan.items) {
-      items.push(await runItem(stagehand, page, previewUrl, item, visualJudge));
+    for (const [index, item] of plan.items.entries()) {
+      const label = `Check ${index + 1}/${plan.items.length}`;
+      onProgress?.(`${label}: ${item.intent}`);
+      const evidence = await runItem(stagehand, page, previewUrl, item, visualJudge,
+        onProgress ? (message) => onProgress(`${label}: ${message}`) : undefined, setup);
+      items.push(evidence);
+      onProgress?.(`${label}: ${evidence.error?.startsWith("Setup blocked:") ? "setup blocked" : evidence.error ? "uncertain (execution error)" : evidence.verdict}.`);
       // Drained per item, not per run: the recorder restarts on every full page
       // load, so the buffer only ever holds the current document's events.
       if (isRecording()) {
@@ -241,6 +250,7 @@ export async function runPlan(
         recordings.push({ intent: item.intent, route: item.route, events });
       }
     }
+    if (isRecording()) onProgress?.("Saving replay...");
     const replayFile = isRecording() ? await writeReplay(recordings) : null;
     const replayUrl = config.actionRunUrl || replayFile || undefined;
 
@@ -352,6 +362,8 @@ async function runItem(
   previewUrl: string,
   item: TestPlan["items"][number],
   visualJudge: ActiveVisualJudge | null,
+  onProgress?: (message: string) => void,
+  setup?: string,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
   const onConsole = (m: { type(): string; text(): string }) => {
@@ -385,11 +397,22 @@ async function runItem(
     await page.waitForLoadState("load", ASSET_SETTLE_MS).catch(() => {});
     dbg(`asset settle ended after ${Date.now() - t}ms; page: ${await pageState(page)}`);
 
+    if (setup) {
+      await applySetup(setup, {
+        inspect: (prompt) => stagehand.extract(prompt, SetupDecisionSchema),
+        act: async (instruction) => {
+          const outcome = await stagehand.act(instruction);
+          if (!outcome.success) throw new SetupBlockedError("The requested UI action could not be completed.");
+        },
+      }, onProgress);
+    }
+
     // Perform each natural-language step. A step the model can't do (act throws)
     // is an execution problem → uncertain, not a false fail; stop the item there.
     for (const [index, step] of item.steps.entries()) {
       dbg(`act ${index + 1}/${item.steps.length}: ${step}`);
       t = Date.now();
+      onProgress?.(`Running step ${index + 1}/${item.steps.length}...`);
       await stagehand.act(step);
       dbg(`act ${index + 1} done in ${Date.now() - t}ms`);
     }
@@ -402,6 +425,7 @@ async function runItem(
     // is genuinely unjudgeable here. Rather than force a pass/fail (a visual-only
     // highlight the human sees in the replay would read as a false fail), the
     // judge can answer "cannot_tell".
+    onProgress?.("Checking the result...");
     const judgment = await stagehand.extract(
       `Determine whether this expectation is satisfied: "${item.expected}".\n` +
         `You can see only the page's DOM/accessibility tree — not its rendered ` +
@@ -420,6 +444,7 @@ async function runItem(
     // show a wrong red.
     let final: z.infer<typeof JudgeSchema> = judgment;
     if (judgment.verdict === "cannot_tell" && visualJudge) {
+      onProgress?.("Checking the screenshot...");
       const visual = await judgeFromScreenshot(page, item, visualJudge);
       // A judge we defaulted to on an OpenAI-compatible host may never have seen
       // the screenshot at all (some hosts drop the image part rather than
@@ -440,6 +465,7 @@ async function runItem(
     verdict = final.verdict === "cannot_tell" ? "uncertain" : final.verdict;
     reasoning = final.reasoning;
   } catch (e) {
+    if (e instanceof SetupBlockedError) onProgress?.(e.message);
     error = e instanceof Error ? e.message : String(e);
   } finally {
     page.off("console", onConsole);

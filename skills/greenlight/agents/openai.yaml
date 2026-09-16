@@ -1,7 +1,7 @@
 interface:
   display_name: "Greenlight"
-  short_description: "Test a PR with your Codex subscription"
-  default_prompt: "Use $greenlight with a GitHub PR URL and its preview URL."
+  short_description: "Initialize browser setup or test a PR"
+  default_prompt: "Use $greenlight init with a repository URL to draft local setup, or $greenlight with a PR URL and preview URL to run checks."
 
 policy:
   allow_implicit_invocation: false

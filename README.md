@@ -78,6 +78,79 @@ request; a Claude subscription login is not required. Settings-file-only gateway
 configuration is not supported by Greenlight's isolated Claude invocation.
 Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 
+### Optional browser setup (local skill only)
+
+Ask Greenlight to draft your personal setup from the app's source:
+
+```text
+/greenlight init https://github.com/owner/repo
+```
+
+In Codex, use `$greenlight init` with the same repository URL. Initialization
+reads relevant app entry routes, authentication, selection screens, and first-run
+setup source files from the default branch. It generates conditional instructions
+for the prerequisites needed to reach the app, with a visible ready condition. It saves
+`~/.greenlight/setup.md` and shows the complete draft for review. Edit that file
+directly if needed, then run your usual Greenlight check. No setup flag is needed.
+Login steps are inferred from source; credentials, MFA, and external sign-in
+requirements are flagged for manual preparation.
+
+An interactive terminal shows a moving three-dot animation while initializing.
+Hosts that buffer terminal output show readable progress messages instead.
+
+The draft is inferred from a bounded source inspection, not browser-verified.
+Review its assumptions before checking the app. Running `init` again displays
+your existing setup without overwriting edits. The single local setup applies
+to every repository you check, so update it when switching apps.
+
+You can also write the file yourself:
+
+Save your personal instructions in `~/.greenlight/setup.md` on the machine
+running Greenlight. The local skill reads this file automatically, with no flag
+required, regardless of the working directory. It applies to every local skill
+run. Greenlight does not look for setup instructions in the repository or PR.
+
+The file stays outside your repository and is not shared with teammates.
+Its contents are sent to your configured model backend to guide browser setup.
+
+Use conditional UI steps and an explicit ready condition. For example:
+
+```markdown
+# Browser setup
+
+After opening each check's route, inspect the welcome modal.
+If it is absent, skip the welcome steps.
+
+If the welcome modal is visible:
+1. Read its statements and select the acknowledgment checkbox.
+   Leave the checkbox selected if it is already checked.
+2. Click "Continue to console".
+3. Wait for the modal to close and the console to appear.
+
+Use the visible UI and let the app manage its localStorage entry.
+
+## Ready condition
+
+The console is visible and the welcome modal no longer blocks interaction.
+If the checkbox cannot be selected or Continue remains disabled,
+report setup as blocked.
+```
+
+Greenlight inspects the current page between setup actions, then starts the
+check only after the ready condition is satisfied. Checks share one fresh
+browser session per run, so the app's saved acknowledgment can carry between
+checks. Setup actions appear in progress updates and in the session replay
+when recording is enabled.
+
+A blocked setup skips that check's test steps and produces an inconclusive
+result labeled `Setup blocked`. Setup is limited to 12 UI actions per check.
+A missing file preserves the normal flow; an empty, unreadable, or oversized
+file stops the run. The file must be UTF-8 and at most 16,000 bytes.
+
+Setup currently applies to every check. When testing the welcome modal itself,
+temporarily remove or adjust your local recipe so setup does not dismiss the
+UI under test. The GitHub Action does not load or apply this file.
+
 ## Want Greenlight on all PRs? Set up the GitHub Action
 
 The GitHub Action is built for **Next.js apps deployed on Vercel**. Other Action

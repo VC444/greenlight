@@ -1,3 +1,4 @@
+import { applySetup, readSetup } from "./setup.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -315,6 +316,7 @@ function dependencies(
     resolveToken: async () => "github-secret",
     createClient: () => fakeClient(routes),
     gatherContext: async () => context,
+    readSetup: async () => null,
     generatePlan: async () => plan,
     executePlan: async () => result,
     browserAvailable: async () => true,
@@ -691,6 +693,7 @@ test("reports missing GitHub credentials without leaking command errors", async 
 
 test("runs the existing planner and browser with GET-only GitHub access", async () => {
   const routes: string[] = [];
+  const progress: string[] = [];
   let receivedPreview = "";
   let receivedPlan: TestPlan | undefined;
   const report = await runGreenlightSkill(
@@ -699,7 +702,9 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
       "https://preview.example",
     ],
     dependencies(routes, {
-      executePlan: async (previewUrl, generatedPlan) => {
+      onProgress: (message) => progress.push(message),
+      executePlan: async (previewUrl, generatedPlan, onProgress) => {
+        onProgress?.("Check 1/1: pass.");
         receivedPreview = previewUrl;
         receivedPlan = generatedPlan;
         return {
@@ -710,6 +715,15 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
     }),
   );
 
+  assert.deepEqual(progress, [
+    "Checking GitHub and model access...",
+    "Reading pull request changes...",
+    "Planning browser checks...",
+    `Plan ready: ${plan.items.length} checks.`,
+    "Looking for ~/.greenlight/setup.md...",
+    "Check 1/1: pass.",
+  ]);
+  assert.doesNotMatch(report, /Reading pull request changes|Check 1\/1: pass/);
   assert.equal(receivedPreview, "https://preview.example/");
   assert.equal(receivedPlan, plan);
   assert.ok(routes.length > 0);
@@ -1085,4 +1099,198 @@ test("model subprocess timeouts remain identifiable without raw output", async (
     file: process.execPath, args: ["-e", "setTimeout(() => {}, 10000)"],
     cwd: os.tmpdir(), timeoutMs: 50,
   })), /Claude Code timed out/);
+});
+
+test("setup loads only the default local file and validates its contents", async () => {
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-setup-"));
+  const folder = path.join(homeDir, ".greenlight");
+  const file = path.join(folder, "setup.md");
+  try {
+    assert.equal(await readSetup(homeDir), null);
+    mkdirSync(folder);
+    const recipe = "# Setup\nReady when the console is visible.";
+    writeFileSync(file, recipe);
+    assert.equal(await readSetup(homeDir), recipe);
+    for (const content of ["", "x".repeat(16001), Buffer.from([255])]) {
+      writeFileSync(file, content);
+      await assert.rejects(readSetup(homeDir), /setup.md/);
+    }
+    rmSync(file);
+    mkdirSync(file);
+    await assert.rejects(readSetup(homeDir), /must be a UTF-8 file/);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("skill loads local setup without a GitHub setup request or altering the test plan", async () => {
+  let executed = false;
+  const routes: string[] = [];
+  await runGreenlightSkill(["https://github.com/owner/repo/pull/1", "https://preview.example"], dependencies(routes, {
+    readSetup: async (...args) => {
+      assert.equal(args.length, 0);
+      return "Welcome setup";
+    },
+    executePlan: async (_url, actualPlan, _progress, setup) => {
+      executed = true;
+      assert.equal(actualPlan, plan);
+      assert.equal(setup, "Welcome setup");
+      return result;
+    },
+  }));
+  assert.equal(executed, true);
+  assert.ok(routes.every((route) => !route.includes("contents")));
+  await assert.rejects(runGreenlightSkill(["https://github.com/owner/repo/pull/1", "https://preview.example"], dependencies([], {
+    readSetup: async () => { throw new Error("Could not read setup"); },
+    executePlan: async () => { assert.fail("must not run without the configured setup"); },
+  })), /Could not read setup/);
+});
+
+test("setup rechecks the page after each action and skips an already ready page", async () => {
+  const actions: string[] = [];
+  const decisions = [
+    { status: "act", action: "Select the acknowledgment checkbox", reason: "Unchecked" },
+    { status: "act", action: "Click Continue to console", reason: "Checkbox selected" },
+    { status: "ready", action: "", reason: "Console visible, modal closed" },
+  ] as const;
+  let index = 0;
+  await applySetup("Dismiss welcome. Ready when console is visible.", {
+    inspect: async (prompt) => {
+      assert.match(prompt, /Dismiss welcome/);
+      if (index > 0) assert.match(prompt, /Select the acknowledgment checkbox/);
+      return decisions[index++]!;
+    },
+    act: async (action) => { actions.push(action); },
+  });
+  assert.deepEqual(actions, ["Select the acknowledgment checkbox", "Click Continue to console"]);
+  await applySetup("Ready when console is visible.", {
+    inspect: async () => decisions[2],
+    act: async () => assert.fail("ready page needs no clicks"),
+  });
+});
+
+test("setup stops on blocked UI, action errors, and repeated attempts", async () => {
+  await assert.rejects(applySetup("recipe", {
+    inspect: async () => ({ status: "blocked", action: "", reason: "Continue remains disabled" }),
+    act: async () => assert.fail("blocked setup must not click"),
+  }), /Setup blocked: Continue remains disabled/);
+  await assert.rejects(applySetup("recipe", {
+    inspect: async () => ({ status: "act", action: "Click Continue", reason: "Visible" }),
+    act: async () => { throw new Error("driver error"); },
+  }), /Setup blocked: Could not inspect or interact/);
+  let actions = 0;
+  await assert.rejects(applySetup("recipe", {
+    inspect: async () => ({ status: "act", action: "Click Continue", reason: "Still visible" }),
+    act: async () => { actions++; },
+  }), /12-action setup limit/);
+  assert.equal(actions, 12);
+});
+
+test("init accepts repository URLs and rejects PRs, credentials, and query strings", async () => {
+  const { parseRepositoryUrl } = await import("./init.js");
+  assert.deepEqual(parseRepositoryUrl("https://github.example/owner/repo/"), {
+    hostname: "github.example", owner: "owner", repo: "repo",
+  });
+  for (const url of ["https://github.com/owner/repo/pull/1", "http://github.com/owner/repo",
+    "https://user:secret@github.com/owner/repo", "https://github.com/owner/repo?x=1"]) {
+    assert.throws(() => parseRepositoryUrl(url));
+  }
+});
+
+test("init generates a reviewable local draft and preserves subsequent user edits", async () => {
+  const { runGreenlightInit } = await import("./init.js");
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-"));
+  const messages: string[] = [];
+  try {
+    const report = await runGreenlightInit("https://github.com/owner/repo", (message) => messages.push(message), {
+      homeDir,
+      context: async (target) => {
+        assert.equal(target.repo, "repo");
+        return { head: "abc123", files: [{ path: "src/Welcome.tsx", content: "Continue to console" }], partial: true };
+      },
+      generate: async (context) => {
+        assert.equal(context.head, "abc123");
+        return { steps: ["If the welcome modal appears, click Continue to console."],
+          readyCondition: "The console is visible.", evidence: ["src/Welcome.tsx contains the continue button."],
+          uncertainties: ["Confirm whether acknowledgment is required."] };
+      },
+    });
+    const saved = await readSetup(homeDir);
+    assert.match(saved!, /Continue to console/);
+    assert.match(report, /not browser-verified/);
+    assert.match(report, /Confirm whether acknowledgment/);
+    assert.match(report, /Edit this file directly/);
+    assert.doesNotMatch(report, /Tell me what you would like to change/);
+    assert.ok(report.includes(saved!));
+    assert.equal(messages.length, 3);
+    writeFileSync(path.join(homeDir, ".greenlight/setup.md"), "My personal edits");
+    const repeat = await runGreenlightInit("https://github.com/owner/repo", () => {}, {
+      homeDir, context: async () => assert.fail("existing setup needs no remote access"),
+      generate: async () => assert.fail("must preserve existing setup"),
+    });
+    assert.match(repeat, /My personal edits/);
+    assert.match(repeat, /Edit this file directly/);
+    assert.equal(await readSetup(homeDir), "My personal edits");
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+test("init writes nothing when generation fails and refuses to overwrite a racing writer", async () => {
+  const { runGreenlightInit, saveInitialSetup } = await import("./init.js");
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-failure-"));
+  try {
+    await assert.rejects(runGreenlightInit("https://github.com/owner/repo", () => {}, {
+      homeDir, context: async () => ({ head: "abc", files: [], partial: true }),
+      generate: async () => ({ steps: [] }),
+    }));
+    assert.equal(await readSetup(homeDir), null);
+    await saveInitialSetup("First writer", homeDir);
+    await assert.rejects(saveInitialSetup("Second writer", homeDir), /EEXIST/);
+    assert.equal(await readSetup(homeDir), "First writer");
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+test("init reads relevant files using one pinned default-branch revision and GET-only calls", async () => {
+  const { gatherSetupContext } = await import("./init.js");
+  const routes: string[] = [];
+  const client = { request: async (route: string, params: Record<string, unknown>) => {
+    routes.push(route);
+    if (route.endsWith("/{repo}")) return { data: { default_branch: "main" } };
+    if (route.includes("/commits/")) {
+      assert.equal(params.ref, "main");
+      return { data: { sha: "pinned", commit: { tree: { sha: "tree" } } } };
+    }
+    if (route.includes("/git/trees/")) {
+      assert.equal(params.tree_sha, "tree");
+      return { data: { truncated: false, tree: [
+        { path: "src/Welcome.tsx", type: "blob", size: 50 },
+        ...["src/Login.tsx", "src/WorkspacePicker.tsx", "src/RouteGuard.tsx", "src/middleware.ts"].map(path => ({ path, type: "blob", size: 50 })),
+        { path: ".env", type: "blob", size: 50 },
+        { path: "vendor/Welcome.tsx", type: "blob", size: 50 },
+      ] } };
+    }
+    assert.ok(["src/Welcome.tsx", "src/Login.tsx", "src/WorkspacePicker.tsx", "src/RouteGuard.tsx", "src/middleware.ts"].includes(params.path as string));
+    assert.equal(params.ref, "pinned");
+    return { data: { type: "file", encoding: "base64", content: Buffer.from("Welcome").toString("base64") } };
+  } } as unknown as Parameters<typeof gatherSetupContext>[0];
+  const result = await gatherSetupContext(client, { hostname: "github.com", owner: "owner", repo: "repo" });
+  assert.deepEqual(result.files.map(file => file.path).sort(), [
+    "src/Login.tsx", "src/RouteGuard.tsx", "src/Welcome.tsx", "src/WorkspacePicker.tsx", "src/middleware.ts",
+  ].sort());
+  assert.ok(routes.every((route) => route.startsWith("GET ")));
+});
+
+test("CLI dispatches init and shows existing setup with readable non-TTY progress", () => {
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
+  try {
+    mkdirSync(path.join(homeDir, ".greenlight"));
+    writeFileSync(path.join(homeDir, ".greenlight/setup.md"), "# My saved setup\nReady when console is visible.");
+    const result = spawnSync(process.execPath, ["bin/greenlight.mjs", "init", "https://github.com/owner/repo"], {
+      cwd: process.cwd(), env: { ...process.env, HOME: homeDir, GREENLIGHT_LOCAL_AGENT: "claude" },
+      encoding: "utf8", timeout: 20_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /My saved setup/);
+    assert.match(result.stderr, /Getting to know your app/);
+    assert.doesNotMatch(result.stderr, /\x1b/);
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });

@@ -18,6 +18,8 @@
     "src/recorder.ts",
     "src/results.ts",
     "src/skill.ts",
+    "src/setup.ts",
+    "src/init.ts",
     "src/skillMain.ts",
     "src/skillOptions.ts",
     "src/subscriptionCli.ts",

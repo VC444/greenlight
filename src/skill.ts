@@ -1,3 +1,4 @@
+import { readSetup, SETUP_PATH } from "./setup.js";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
@@ -45,10 +46,12 @@ type GitHubClient = Parameters<typeof gatherPrContext>[0];
 type CommandRunner = (file: string, args: string[]) => Promise<string>;
 
 export interface SkillDependencies {
+  onProgress?: (message: string) => void;
   env: NodeJS.ProcessEnv;
   resolveToken: (hostname: string) => Promise<string>;
   createClient: (token: string, baseUrl: string) => GitHubClient;
   gatherContext: typeof gatherPrContext;
+  readSetup: typeof readSetup;
   generatePlan: (
     context: Awaited<ReturnType<typeof gatherPrContext>>,
   ) => Promise<TestPlan | null>;
@@ -141,7 +144,7 @@ function usesCloudTokens(hostname: string): boolean {
   return hostname === "github.com" || hostname.endsWith(".ghe.com");
 }
 
-function gitHubApiUrl(hostname: string): string {
+export function gitHubApiUrl(hostname: string): string {
   if (hostname === "github.com") return "https://api.github.com";
   if (hostname.endsWith(".ghe.com")) return `https://api.${hostname}`;
   return `https://${hostname}/api/v3`;
@@ -327,6 +330,7 @@ const defaultDependencies: SkillDependencies = {
   createClient: (token, baseUrl) =>
     new Octokit({ auth: token, baseUrl }) as unknown as GitHubClient,
   gatherContext: gatherPrContext,
+  readSetup,
   generatePlan: generateTestPlan,
   executePlan: runPlan,
   browserAvailable: () => browserAvailable(),
@@ -339,6 +343,8 @@ export async function runGreenlightSkill(
 ): Promise<string> {
   const input = parseSkillInput(args);
   const dependencies = { ...defaultDependencies, ...overrides };
+  const progress = dependencies.onProgress;
+  progress?.("Checking GitHub and model access...");
   const token = await dependencies.resolveToken(input.pullRequest.hostname);
   const client = dependencies.createClient(
     token,
@@ -357,6 +363,7 @@ export async function runGreenlightSkill(
 
   let context: Awaited<ReturnType<typeof gatherPrContext>>;
   try {
+    progress?.("Reading pull request changes...");
     context = await dependencies.gatherContext(client, job);
   } catch (error) {
     const status = statusOf(error);
@@ -371,6 +378,7 @@ export async function runGreenlightSkill(
 
   let plan: TestPlan | null;
   try {
+    progress?.("Planning browser checks...");
     plan = await dependencies.generatePlan(context);
   } catch (error) {
     if (error instanceof SubscriptionRequestError) {
@@ -386,9 +394,19 @@ export async function runGreenlightSkill(
     );
   }
 
+  progress?.(`Plan ready: ${plan.items.length} checks.`);
   if (plan.items.length === 0) {
     return appendActionPrompt(renderNothingToTest(plan, headSha));
   }
+
+  progress?.(`Looking for ${SETUP_PATH}...`);
+  let setup: string | null;
+  try {
+    setup = await dependencies.readSetup();
+  } catch (error) {
+    throw new SkillError(error instanceof Error ? error.message : "Could not load browser setup.");
+  }
+  if (setup) progress?.(`Loaded local setup from ${SETUP_PATH}.`);
 
   if (!(await dependencies.browserAvailable())) {
     throw new SkillError(
@@ -398,7 +416,7 @@ export async function runGreenlightSkill(
 
   let result: Awaited<ReturnType<typeof runPlan>>;
   try {
-    result = await dependencies.executePlan(input.previewUrl, plan);
+    result = await dependencies.executePlan(input.previewUrl, plan, progress, setup ?? undefined);
   } catch {
     throw new SkillError(
       "Greenlight could not start or complete the browser session. Check Chrome and the model settings.",
