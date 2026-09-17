@@ -192,6 +192,21 @@ export async function reportPaused(
   });
 }
 
+export function renderPmReview(plan: TestPlan): string {
+  const review = plan.pmReview;
+  const lines = ["#### PM perspective", "", "Based on PR context; not browser-verified.", ""];
+  if (!review) {
+    lines.push("PM review unavailable for this plan.");
+  } else {
+    if (review.concerns.length === 0) lines.push("No clear product concerns found in the supplied PR context.");
+    for (const item of review.concerns) {
+      lines.push(`- **${item.concern}** ${item.impact} Evidence: ${item.evidence} Suggestion: ${item.suggestion}`);
+    }
+    if (review.limitation) lines.push("", `Review limitation: ${review.limitation}`);
+  }
+  return lines.join("\n");
+}
+
 export function renderResultsComment(
   plan: TestPlan,
   result: ExecutionResult,
@@ -208,6 +223,8 @@ export function renderResultsComment(
     `**${headline(t)}** across ${t.total} check(s).`,
     "",
     renderItems(result.items),
+    "",
+    renderPmReview(plan),
   ];
   const replay = replayLine(result).trim();
   if (replay) lines.push("", replay);
@@ -295,7 +312,7 @@ export async function reportResults(
     conclusion: conclusion(t),
     title: headline(t),
     summary: `${plan.summary}\n\n**${headline(t)}** across ${t.total} check(s).${replayLine(result)}`,
-    text: renderItems(result.items),
+    text: `${renderItems(result.items)}\n\n${renderPmReview(plan)}`,
   });
   await upsertResultsComment(octokit, job, plan, result, checkUrl);
 }

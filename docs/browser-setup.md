@@ -6,16 +6,17 @@ not load or apply this workflow.
 
 ## Create and review setup
 
-Run `/greenlight init https://github.com/owner/repo` in Claude Code, or
-`$greenlight init https://github.com/owner/repo` in Codex. Greenlight reads a
-bounded selection of app entry routes and prerequisite source files from the
-default branch, then saves a draft to `~/.greenlight/setup.yaml`.
+Run `/greenlight init` in Claude Code, or `$greenlight init` in Codex.
+Greenlight asks you to describe the setup steps in order and how to tell the
+app is ready. It asks for any missing labels, conditions, or deadlines, then
+saves your answers as `~/.greenlight/setup.yaml`. No repository URL is needed.
+Initialization does not inspect source code or infer setup steps.
 
-The draft is inferred from source, not browser-verified. Review the actions,
-conditions, deadlines, and assumptions before running checks. Credentials,
-MFA, and external sign-in requirements need manual preparation. Running
-`init` again displays your existing valid setup without overwriting edits.
-You can also write the file yourself using the schema below.
+Review the saved recipe before running checks; it has not been
+browser-verified. Credentials, MFA, and external sign-in requirements need
+manual preparation. Running `init` again displays your existing valid setup
+without overwriting edits. You can also write the file yourself using the
+schema below.
 
 The local skill reads this file automatically, regardless of the working
 directory. One setup applies to every repository you check, so update it when
@@ -32,9 +33,6 @@ individual unconditional UI interactions.
 version: 1
 steps:
   - id: dismiss-welcome
-    skip_if: >
-      The console navigation is visible and usable,
-      and the welcome dialog is absent.
     wait_for: >
       The welcome dialog containing
       "I acknowledge the above statements." is visible.
@@ -57,17 +55,14 @@ ready:
 | `version` | Must be `1`. |
 | `steps` | Ordered setup steps; may be empty when only readiness needs checking. |
 | `steps[].id` | Unique identifier using letters, digits, underscores, or hyphens. |
-| `steps[].skip_if` | Optional positive evidence that this step is already complete. Omit or use `null` for a required step. |
 | `steps[].wait_for` | Visible prerequisite for executing the actions. |
-| `steps[].timeout_ms` | Deadline applied separately to the skip observation, prerequisite, and postcondition. |
+| `steps[].timeout_ms` | Deadline applied separately to the prerequisite and postcondition. |
 | `steps[].actions` | Nonempty list of individual UI actions executed in order. |
 | `steps[].verify` | Visible postcondition required after all actions. |
 | `ready.condition` | Final observable condition required before testing begins. |
 | `ready.timeout_ms` | Deadline for the final readiness check. |
 
-Choose conditions and deadlines appropriate for your app. An absent dialog
-alone is insufficient evidence for `skip_if`; describe the usable app state
-that confirms the step is already complete. Express waits in conditions and
+Choose conditions and deadlines appropriate for your app. Express waits in conditions and
 make checkbox actions idempotent, such as ensuring a checkbox is selected.
 
 Deadlines must be integers from 1 to 300000 milliseconds. Each deadline
@@ -76,16 +71,15 @@ timeout.
 
 ## Execution and failures
 
-For each step, Greenlight evaluates `skip_if` once, if provided. It skips only
-when that condition is positively verified. Otherwise it waits for
+Every configured step runs in order. For each step, Greenlight waits for
 `wait_for`, executes each action in order, and waits for `verify`. Unsatisfied
 or uncertain conditions are retried until their deadline. After every step
-has completed or been explicitly skipped, Greenlight evaluates `ready`.
+has completed, Greenlight evaluates `ready`.
 Natural-language conditions depend on model interpretation of visible UI.
 
 A failed action, observation error, or expired deadline prevents that check's
 test steps from starting. The result is inconclusive and labeled
-`Setup blocked`. Progress logs identify steps, skips and their evidence,
+`Setup blocked`. Progress logs identify steps,
 condition verification, and failures. Setup actions appear in the session
 replay when recording is enabled.
 
@@ -102,3 +96,6 @@ browser execution. YAML aliases and multiple documents are not supported.
 
 A missing setup file preserves the normal flow. An empty, invalid, unreadable,
 or oversized file stops the run.
+
+Existing recipes containing `skip_if` are rejected as invalid. Remove that
+field before running checks; every remaining step is required.

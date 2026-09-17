@@ -202,7 +202,7 @@ test("skill runner isolates npm cache, cleans up on failure, and honors cache ov
   const temp = path.join(root, "temporary files");
   mkdirSync(temp);
   const run = (extra: Record<string, string> = {}) => spawnSync("/bin/bash", [
-    path.resolve("skills/greenlight/scripts/run-greenlight.sh"), "init", "https://github.com/owner/repo",
+    path.resolve("skills/greenlight/scripts/run-greenlight.sh"), "init",
   ], {
     encoding: "utf8",
     env: {
@@ -1204,7 +1204,7 @@ test("skill loads local setup without a GitHub setup request or altering the tes
 
 const structuredSetup = JSON.stringify({
   version: 1,
-  steps: [{ id: "welcome", skip_if: "Console usable and welcome absent", wait_for: "Welcome visible",
+  steps: [{ id: "welcome", wait_for: "Welcome visible",
     timeout_ms: 1000, actions: ["Ensure acknowledgment is checked", "Click Continue"], verify: "Welcome closed" }],
   ready: { condition: "Console usable", timeout_ms: 1000 },
 });
@@ -1215,7 +1215,6 @@ test("setup waits for a delayed modal and resolves steps before checking readine
   let time = 0;
   await applySetup(structuredSetup, {
     inspect: async (prompt) => {
-      if (prompt.includes("Console usable and welcome absent")) return { status: "unsatisfied", reason: "Still loading" };
       if (prompt.includes("Welcome visible")) {
         events.push("wait");
         return { status: ++welcomeInspections === 1 ? "unsatisfied" : "satisfied", reason: "Observed page" };
@@ -1228,15 +1227,15 @@ test("setup waits for a delayed modal and resolves steps before checking readine
   assert.deepEqual(events, ["wait", "wait", "Ensure acknowledgment is checked", "Click Continue", "verify", "ready"]);
 });
 
-test("setup skips only on explicit evidence and still checks final readiness", async () => {
-  const messages: string[] = [];
-  let inspections = 0;
-  await applySetup(structuredSetup, {
-    inspect: async () => { inspections++; return { status: "satisfied", reason: "Console usable; welcome absent" }; },
-    act: async () => assert.fail("already completed setup needs no clicks"),
-  }, (message) => messages.push(message));
-  assert.equal(inspections, 2);
-  assert.ok(messages.some(message => /welcome.*skipped.*Console usable/.test(message)));
+test("setup rejects skip conditions before inspecting or acting", async () => {
+  for (const skip_if of ["Console usable", null]) {
+    const setup = JSON.parse(structuredSetup);
+    setup.steps[0].skip_if = skip_if;
+    await assert.rejects(applySetup(JSON.stringify(setup), {
+      inspect: async () => assert.fail("invalid setup must not inspect"),
+      act: async () => assert.fail("invalid setup must not act"),
+    }), /skip_if/);
+  }
 });
 
 test("unresolved setup blocks the check on timeout, uncertainty, and failed verification", async () => {
@@ -1247,7 +1246,6 @@ test("unresolved setup blocks the check on timeout, uncertainty, and failed veri
     await assert.rejects((async () => {
       await applySetup(structuredSetup, {
         inspect: async (prompt) => {
-          if (prompt.includes("Console usable and welcome absent")) return { status: "unsatisfied", reason: "Welcome not dismissed" };
           if (phase === "unknown") return { status: "unknown", reason: "Cannot determine" };
           const failed = (phase === "wait" && prompt.includes("Welcome visible")) ||
             (phase === "verify" && prompt.includes("Welcome closed")) ||
@@ -1300,7 +1298,6 @@ test("legacy setup blocks execution with migration guidance and remains untouche
 
 test("required steps cannot be bypassed by an early global ready decision", async () => {
   const setup = JSON.parse(structuredSetup);
-  delete setup.steps[0].skip_if;
   await assert.rejects(applySetup(JSON.stringify(setup), {
     inspect: async () => ({ status: "ready", reason: "App looks ready" }) as never,
     act: async () => assert.fail("invalid decision must block"),
@@ -1309,7 +1306,6 @@ test("required steps cannot be bypassed by an early global ready decision", asyn
 
 test("required steps execute in order even when the app already looks ready", async () => {
   const setup = JSON.parse(structuredSetup);
-  delete setup.steps[0].skip_if;
   setup.steps.push({ id: "workspace", wait_for: "Workspace picker visible", timeout_ms: 1000,
     actions: ["Select saved workspace"], verify: "Workspace selected" });
   const events: string[] = [];
@@ -1332,110 +1328,135 @@ test("stalled observations respect the configured deadline", async () => {
   }), /Setup blocked: ready: observation timed out/);
 });
 
-test("init accepts repository URLs and rejects PRs, credentials, and query strings", async () => {
-  const { parseRepositoryUrl } = await import("./init.js");
-  assert.deepEqual(parseRepositoryUrl("https://github.example/owner/repo/"), {
-    hostname: "github.example", owner: "owner", repo: "repo",
-  });
-  for (const url of ["https://github.com/owner/repo/pull/1", "http://github.com/owner/repo",
-    "https://user:secret@github.com/owner/repo", "https://github.com/owner/repo?x=1"]) {
-    assert.throws(() => parseRepositoryUrl(url));
-  }
-});
-
-test("init generates a reviewable local draft and preserves subsequent user edits", async () => {
-  const { runGreenlightInit } = await import("./init.js");
+test("init prompts without creating a file and saves supplied steps unchanged", async () => {
+  const { runGreenlightInit, parseInitOptions } = await import("./init.js");
   const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-"));
-  const messages: string[] = [];
   try {
-    const report = await runGreenlightInit("https://github.com/owner/repo", (message) => messages.push(message), {
-      homeDir,
-      context: async (target) => {
-        assert.equal(target.repo, "repo");
-        return { head: "abc123", files: [{ path: "src/Welcome.tsx", content: "Continue to console" }], partial: true };
-      },
-      generate: async (context) => {
-        assert.equal(context.head, "abc123");
-        return { setup: JSON.parse(structuredSetup), evidence: ["src/Welcome.tsx contains the continue button."],
-          uncertainties: ["Confirm whether acknowledgment is required."] };
-      },
-    });
-    const saved = await readSetup(homeDir);
-    assert.match(saved!, /Click Continue/);
-    assert.match(report, /not browser-verified/);
-    assert.match(report, /Confirm whether acknowledgment/);
-    assert.match(report, /Edit this file directly/);
-    assert.doesNotMatch(report, /Tell me what you would like to change/);
-    assert.ok(report.includes(saved!));
-    assert.equal(messages.length, 3);
+    assert.deepEqual(parseInitOptions([]), {});
+    assert.deepEqual(parseInitOptions(["--setup-file", "recipe.yaml"]), { setupFile: "recipe.yaml" });
+    for (const args of [["https://github.example.com/owner/repo"], ["--setup-file"], ["--force"]]) {
+      assert.throws(() => parseInitOptions(args), /Usage/);
+    }
+    const prompt = await runGreenlightInit({ homeDir });
+    assert.match(prompt, /What steps should Greenlight follow/);
+    assert.equal(await readSetup(homeDir), null);
+    const setupFile = path.join(homeDir, "supplied.yaml");
+    writeFileSync(setupFile, structuredSetup);
+    const report = await runGreenlightInit({ homeDir, setupFile });
+    assert.match(report, /Saved your supplied steps/);
+    assert.equal(await readSetup(homeDir), structuredSetup);
     writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), "# My personal edits\n" + structuredSetup);
-    const repeat = await runGreenlightInit("https://github.com/owner/repo", () => {}, {
-      homeDir, context: async () => assert.fail("existing setup needs no remote access"),
-      generate: async () => assert.fail("must preserve existing setup"),
-    });
+    const repeat = await runGreenlightInit({ homeDir, setupFile: "nonexistent.yaml" });
     assert.match(repeat, /My personal edits/);
-    assert.match(repeat, /Edit this file directly/);
     assert.equal(await readSetup(homeDir), "# My personal edits\n" + structuredSetup);
   } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
-test("init writes nothing when generation fails and refuses to overwrite a racing writer", async () => {
+test("init rejects invalid input without writing and refuses to overwrite a racing writer", async () => {
   const { runGreenlightInit, saveInitialSetup } = await import("./init.js");
   const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-failure-"));
   try {
-    await assert.rejects(runGreenlightInit("https://github.com/owner/repo", () => {}, {
-      homeDir, context: async () => ({ head: "abc", files: [], partial: true }),
-      generate: async () => ({ steps: [] }),
-    }));
-    assert.equal(await readSetup(homeDir), null);
+    const setupFile = path.join(homeDir, "supplied.yaml");
+    for (const content of ["steps: []", "#".repeat(16001), Buffer.from([0xff])]) {
+      writeFileSync(setupFile, content);
+      await assert.rejects(runGreenlightInit({ homeDir, setupFile }));
+      assert.equal(await readSetup(homeDir), null);
+    }
     await saveInitialSetup("# First writer\n" + structuredSetup, homeDir);
     await assert.rejects(saveInitialSetup("# Second writer\n" + structuredSetup, homeDir), /EEXIST/);
     assert.equal(await readSetup(homeDir), "# First writer\n" + structuredSetup);
   } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
-test("init reads relevant files using one pinned default-branch revision and GET-only calls", async () => {
-  const { gatherSetupContext } = await import("./init.js");
-  const routes: string[] = [];
-  const client = { request: async (route: string, params: Record<string, unknown>) => {
-    routes.push(route);
-    if (route.endsWith("/{repo}")) return { data: { default_branch: "main" } };
-    if (route.includes("/commits/")) {
-      assert.equal(params.ref, "main");
-      return { data: { sha: "pinned", commit: { tree: { sha: "tree" } } } };
-    }
-    if (route.includes("/git/trees/")) {
-      assert.equal(params.tree_sha, "tree");
-      return { data: { truncated: false, tree: [
-        { path: "src/Welcome.tsx", type: "blob", size: 50 },
-        ...["src/Login.tsx", "src/WorkspacePicker.tsx", "src/RouteGuard.tsx", "src/middleware.ts"].map(path => ({ path, type: "blob", size: 50 })),
-        { path: ".env", type: "blob", size: 50 },
-        { path: "vendor/Welcome.tsx", type: "blob", size: 50 },
-      ] } };
-    }
-    assert.ok(["src/Welcome.tsx", "src/Login.tsx", "src/WorkspacePicker.tsx", "src/RouteGuard.tsx", "src/middleware.ts"].includes(params.path as string));
-    assert.equal(params.ref, "pinned");
-    return { data: { type: "file", encoding: "base64", content: Buffer.from("Welcome").toString("base64") } };
-  } } as unknown as Parameters<typeof gatherSetupContext>[0];
-  const result = await gatherSetupContext(client, { hostname: "github.com", owner: "owner", repo: "repo" });
-  assert.deepEqual(result.files.map(file => file.path).sort(), [
-    "src/Login.tsx", "src/RouteGuard.tsx", "src/Welcome.tsx", "src/WorkspacePicker.tsx", "src/middleware.ts",
-  ].sort());
-  assert.ok(routes.every((route) => route.startsWith("GET ")));
+test("CLI init prompts, saves user input, and preserves existing setup", () => {
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
+  const run = (...args: string[]) => spawnSync(process.execPath, ["bin/greenlight.mjs", "init", ...args], {
+    cwd: process.cwd(), env: { ...process.env, HOME: homeDir, GREENLIGHT_LOCAL_AGENT: "claude" },
+    encoding: "utf8", timeout: 20_000,
+  });
+  try {
+    const prompt = run();
+    assert.equal(prompt.status, 0, prompt.stderr);
+    assert.match(prompt.stdout, /What steps should Greenlight follow/);
+    const setupFile = path.join(homeDir, "supplied.yaml");
+    writeFileSync(setupFile, "# My saved setup\n" + structuredSetup);
+    const saved = run("--setup-file", setupFile);
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.match(saved.stdout, /Saved your supplied steps/);
+    const repeat = run();
+    assert.equal(repeat.status, 0, repeat.stderr);
+    assert.match(repeat.stdout, /My saved setup/);
+    assert.match(repeat.stdout, /Kept your edits unchanged/);
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
-test("CLI dispatches init and shows existing setup with readable non-TTY progress", () => {
-  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
-  try {
-    mkdirSync(path.join(homeDir, ".greenlight"));
-    writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), "# My saved setup\n" + structuredSetup);
-    const result = spawnSync(process.execPath, ["bin/greenlight.mjs", "init", "https://github.com/owner/repo"], {
-      cwd: process.cwd(), env: { ...process.env, HOME: homeDir, GREENLIGHT_LOCAL_AGENT: "claude" },
-      encoding: "utf8", timeout: 20_000,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /My saved setup/);
-    assert.match(result.stderr, /Getting to know your app/);
-    assert.doesNotMatch(result.stderr, /\x1b/);
-  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+const pmReview = {
+  concerns: [{
+    concern: "Failed payments have no recovery action.",
+    evidence: "The checkout change shows an error but removes the retry button.",
+    impact: "Customers cannot complete their purchase after a temporary failure.",
+    suggestion: "Keep a retry action that preserves the entered details.",
+  }],
+  limitation: "The linked acceptance criteria were not provided.",
+};
+
+test("local reports include grounded PM concerns without changing browser verdicts", async () => {
+  const reviewedPlan = { ...plan, pmReview };
+  const report = await runGreenlightSkill(
+    ["https://github.example.com/owner/repo/pull/1", "https://preview.example"],
+    dependencies([], { generatePlan: async () => reviewedPlan }),
+  );
+  assert.match(report, /#### PM perspective/);
+  assert.match(report, /Based on PR context; not browser-verified/);
+  for (const text of Object.values(pmReview.concerns[0]!)) assert.ok(report.includes(text));
+  assert.ok(report.includes(pmReview.limitation));
+  assert.match(report, /1 passed/);
+});
+
+test("PM review remains available when nothing is browser-testable", async () => {
+  const { renderNothingToTest, parsePlanBody } = await import("./comment.js");
+  const reviewedPlan = { ...plan, items: [], pmReview };
+  const report = await runGreenlightSkill(
+    ["https://github.example.com/owner/repo/pull/1", "https://preview.example"],
+    dependencies([], {
+      generatePlan: async () => reviewedPlan,
+      browserAvailable: async () => assert.fail("no browser needed"),
+    }),
+  );
+  assert.ok(report.includes(pmReview.concerns[0]!.concern));
+  const body = "<!-- greenlight:plan sha:abc123 confidence:high -->\n" + renderNothingToTest(reviewedPlan, "abc123");
+  assert.equal(parsePlanBody(body)?.plan.summary, plan.summary);
+});
+
+test("PM review distinguishes no concerns from unavailable review and caps concerns at eight", async () => {
+  const { renderPmReview } = await import("./results.js");
+  const { PmReviewSchema } = await import("./testplan.js");
+  assert.match(renderPmReview({ ...plan, pmReview: { concerns: [], limitation: null } }), /No clear product concerns/);
+  assert.match(renderPmReview(plan), /unavailable/);
+  assert.doesNotMatch(renderPmReview(plan), /No clear product concerns/);
+  const concerns = Array.from({ length: 8 }, (_, index) => ({
+    ...pmReview.concerns[0]!, concern: `Product concern ${index + 1}`,
+  }));
+  const review = PmReviewSchema.parse({ ...pmReview, concerns });
+  assert.equal(review.concerns.length, 8);
+  assert.throws(() => PmReviewSchema.parse({ ...pmReview, concerns: [...concerns, concerns[0]] }));
+  const rendered = renderPmReview({ ...plan, pmReview: review });
+  for (const item of concerns) assert.ok(rendered.includes(item.concern));
+  assert.throws(() => PmReviewSchema.parse({ ...pmReview, concerns: [{ ...pmReview.concerns[0], evidence: "" }] }));
+});
+
+test("GitHub results include the PM review without changing the check conclusion", async () => {
+  const { reportResults } = await import("./results.js");
+  const writes: Array<Record<string, any>> = [];
+  const client = { request: async (route: string, params: Record<string, any>) => {
+    if (route.includes("GET") && route.endsWith("check-runs")) return { data: { check_runs: [] } };
+    if (route.includes("GET")) return { data: [] };
+    writes.push(params);
+    return { data: { html_url: "https://github.example.com/owner/repo/checks/1" } };
+  } } as unknown as Parameters<typeof reportResults>[0];
+  await reportResults(client, { owner: "owner", repo: "repo", prNumber: 1, headSha: "abc123", action: "synchronize" },
+    { ...plan, pmReview }, result);
+  assert.equal(writes[0]!.conclusion, "success");
+  assert.ok(writes[0]!.output.text.includes(pmReview.concerns[0]!.concern));
+  assert.ok(writes[1]!.body.includes(pmReview.concerns[0]!.concern));
 });

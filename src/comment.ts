@@ -1,3 +1,4 @@
+import { renderPmReview } from "./results.js";
 import type { Octokit } from "@octokit/core";
 import type { PullRequestJob } from "./job.js";
 import type { TestPlan } from "./testplan.js";
@@ -129,7 +130,7 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
     }
     if (!inPlan) continue;
     // The rule below the items separates the plan from the gate and footer.
-    if (line.startsWith("---")) break;
+    if (line.startsWith("---") || line === "#### PM perspective") break;
     if (line.includes(RUN_TOKEN)) continue;
 
     const item = line.match(ITEM_RE);
@@ -218,6 +219,8 @@ export function renderNothingToTest(plan: TestPlan, headSha: string): string {
     "### 🎄 Greenlight: nothing to verify",
     "",
     plan.summary,
+    "",
+    renderPmReview(plan),
     "",
     `<sub>As of \`${headSha.slice(0, 7)}\` this change has no browser-testable surface, so I'll sit it out.</sub>`,
   ].join("\n");

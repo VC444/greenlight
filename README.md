@@ -81,20 +81,29 @@ Greenlight saves a replay to your Desktop unless you pass `--no-record`.
 ### Optional browser setup (local skill only)
 
 If your app needs preparation before testing, such as dismissing a welcome
-dialog or selecting a workspace, ask Greenlight to draft a setup workflow:
+dialog or selecting a workspace, give Greenlight your setup steps:
 
 ```text
-/greenlight init https://github.com/owner/repo
+/greenlight init
 ```
 
-In Codex, use `$greenlight init` with the same repository URL. Greenlight saves
-`~/.greenlight/setup.yaml`. Review the draft before running checks: it is
-inferred from source and has not been browser-verified. The local skill loads
-it automatically for every repository you check, so update it when switching
-apps. Running `init` again preserves your edits.
+In Codex, use `$greenlight init`. Greenlight asks for your setup steps and any
+missing details, then saves them to `~/.greenlight/setup.yaml`. No repository
+URL is needed and no steps are inferred from source. Review the saved recipe
+before running checks. The local skill loads it automatically for every
+repository you check, so update it when switching apps. Running `init` again
+preserves your edits.
 
 See [Browser setup](docs/browser-setup.md) for the schema, an example, and
 execution rules.
+
+### Product perspective
+
+Greenlight reports include a short PM perspective based on the PR description,
+linked issue, and code changes. It highlights actionable product concerns with evidence, user impact, and a
+suggested fix or clarification, ordered by impact, with a maximum of eight concerns.
+When no clear concerns are supported, it says so. Missing context is called
+out, and the review is separate from browser test verdicts.
 
 ## Want Greenlight on all PRs? Set up the GitHub Action
 

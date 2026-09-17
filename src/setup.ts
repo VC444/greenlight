@@ -12,7 +12,6 @@ export const SetupSchema = z.strictObject({
   version: z.literal(1),
   steps: z.array(z.strictObject({
     id: text.regex(/^[a-zA-Z0-9_-]+$/),
-    skip_if: text.nullable().optional().describe("Positive evidence that this step is already complete; omit or use null for required steps"),
     wait_for: text.describe("Visible prerequisite for this step's actions"),
     timeout_ms: timeout.describe("User-reviewable deadline for each condition check in this step"),
     actions: z.array(text).min(1).max(12).describe("Individual UI actions executed in order; no conditional instructions"),
@@ -154,14 +153,6 @@ export async function applySetup(
   }
   try {
     for (const step of setup.steps) {
-      if (step.skip_if) {
-        phase = `${step.id} skip_if`;
-        const decision = await inspect(step.skip_if, step.timeout_ms);
-        if (decision.status === "satisfied") {
-          onProgress?.(`Setup ${step.id}: skipped. ${decision.reason}`);
-          continue;
-        }
-      }
       phase = `${step.id} wait_for`;
       await waitFor(step.wait_for, step.timeout_ms);
       for (const [index, action] of step.actions.entries()) {

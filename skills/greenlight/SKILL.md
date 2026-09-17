@@ -1,15 +1,19 @@
 ---
 name: greenlight
-description: Initialize personal browser setup from a GitHub repository URL, or run Greenlight checks for a pull request and preview URL using the current agent subscription.
+description: Collect user-provided personal browser setup steps, or run Greenlight checks for a pull request and preview URL using the current agent subscription.
 ---
 
 # Greenlight
 
 ## Initialize personal setup
 
-For `/greenlight init <GitHub repository URL>` (or `$greenlight init` in Codex), run the runner below with `init` and the repository URL. This invocation authorizes reading the supplied repository, sending relevant source to the current model backend, and creating `~/.greenlight/setup.yaml` locally. Prefer a yielding terminal with TTY support for the initialization animation. If the host buffers terminal output, relay progress messages in chat as they arrive; do not promise live animation inside a static chat message.
+For `/greenlight init` (or `$greenlight init` in Codex), run `bash scripts/run-greenlight.sh init` from this skill directory. No repository URL is needed. Initialization uses only the user's instructions; do not inspect repositories or previews to infer steps.
 
-Display the returned draft in full so the user can review it. Explain that it was inferred from code and has not been browser-verified. Point the user to the saved file location for any edits. Initialization discovers general app entry prerequisites, including login, workspace selection, and first-run dialogs. Flag any missing credentials or manual authentication requirements from the draft. Initialization preserves an existing valid YAML setup file and displays it for review. Consult `docs/browser-setup.md` in the repository for the setup schema and execution rules.
+If the runner displays an existing setup, show it and stop, preserving the file. If it reports an error, return the error and stop. Otherwise ask the returned question in chat and wait for the user's steps before continuing.
+
+Read `docs/browser-setup.md` in the repository for the YAML schema. Translate the user's answers into ordered steps. Ask follow-up questions for missing exact labels, visible prerequisites, postconditions, the final ready condition, and deadlines. Every configured step runs in order. If the user needs no actions, use an empty steps list and their ready condition. Keep credentials out of the recipe; manual authentication must be completed before checks. Never invent actions, consent choices, conditions, or deadlines.
+
+Once the answers are complete, write the recipe to a temporary UTF-8 YAML file and run `bash scripts/run-greenlight.sh init --setup-file <absolute temporary file path>`. The runner validates and saves it to `~/.greenlight/setup.yaml` without overwriting an existing setup. Remove the temporary file afterward. Display the saved recipe for review and explain that it contains the user's supplied steps and has not been browser-verified.
 
 ## Run checks
 

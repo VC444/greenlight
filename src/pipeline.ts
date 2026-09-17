@@ -182,7 +182,7 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
           ` — replay ${result.replayUrl ?? "n/a"}`,
       );
       // Surface the verdicts on the PR: check run + results comment.
-      await reportResults(octokit, job, current.plan, result);
+      await reportResults(octokit, job, { ...current.plan, pmReview: plan.pmReview }, result);
     }
     return;
   }
