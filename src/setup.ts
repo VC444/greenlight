@@ -171,3 +171,31 @@ export async function applySetup(
     throw new SetupBlockedError(`${phase}: could not inspect or interact with the setup UI.`);
   }
 }
+
+export class PrerequisiteBlockedError extends Error {
+  constructor(reason: string) {
+    super(`Prerequisite blocked: ${reason}`);
+    this.name = "PrerequisiteBlockedError";
+  }
+}
+
+export async function applyStartingState(
+  state: { steps: string[]; condition: string },
+  driver: SetupDriver,
+  onProgress?: (message: string) => void,
+): Promise<void> {
+  try {
+    for (const [index, step] of state.steps.entries()) {
+      onProgress?.(`Preparing starting state ${index + 1}/${state.steps.length}: ${step}`);
+      await driver.act(step);
+    }
+    await applySetup(JSON.stringify({
+      version: 1,
+      steps: [],
+      ready: { condition: state.condition, timeout_ms: 60000 },
+    }), driver, (message) => onProgress?.(message.replace(/browser setup|Browser setup|Setup/g, "Starting state")));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message.replace(/^Setup blocked: /, "") : "Could not establish starting state.";
+    throw new PrerequisiteBlockedError(reason);
+  }
+}

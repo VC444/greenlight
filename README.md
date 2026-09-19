@@ -92,10 +92,21 @@ missing details, then saves them to `~/.greenlight/setup.yaml`. No repository
 URL is needed and no steps are inferred from source. Review the saved recipe
 before running checks. The local skill loads it automatically for every
 repository you check, so update it when switching apps. Running `init` again
-preserves your edits.
+preserves your edits. Initialization runs from the installed skill without a
+runtime download. Browser checks still require the runtime package.
 
 See [Browser setup](docs/browser-setup.md) for the schema, an example, and
 execution rules.
+
+### Checks that need specific data
+
+For changes deep in a flow, Greenlight uses reproduction instructions from the
+PR and asks for missing prerequisites before opening the browser. You can
+identify a suitable record, describe how to prepare one, or provide run notes
+with `--context-file /tmp/greenlight-context.txt`. Simple checks need no extra
+input. Greenlight verifies the starting state before testing; unavailable
+prerequisites leave the affected check inconclusive. This is available in the
+local skill. See [PR-specific starting states](docs/browser-setup.md#pr-specific-starting-states).
 
 ### Product perspective
 

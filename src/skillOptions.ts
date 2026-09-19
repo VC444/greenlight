@@ -1,13 +1,15 @@
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 export const LOCAL_SKILL_USAGE =
   "Usage: greenlight [--no-record | --record-dir <absolute path>] " +
-  "<GitHub PR URL> <preview URL>";
+  "[--context-file <absolute path>] <GitHub PR URL> <preview URL>";
 
 export interface LocalSkillOptions {
   args: string[];
   replayDir: string;
+  contextFile?: string;
 }
 
 interface OptionDefaults {
@@ -27,10 +29,19 @@ export function parseLocalSkillOptions(
   const input = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
   const args: string[] = [];
   let noRecord = false;
+  let contextFile: string | undefined;
   let replayDir: string | undefined;
 
   for (let index = 0; index < input.length; index++) {
     const value = input[index]!;
+    if (value === "--context-file" || value.startsWith("--context-file=")) {
+      if (contextFile !== undefined) throw new Error("Supply --context-file only once.");
+      contextFile = value === "--context-file" ? input[++index] : value.slice("--context-file=".length);
+      if (!contextFile || !path.isAbsolute(contextFile)) {
+        throw new Error(`--context-file requires an absolute path. ${LOCAL_SKILL_USAGE}`);
+      }
+      continue;
+    }
     if (value === "--no-record") {
       noRecord = true;
       continue;
@@ -71,6 +82,7 @@ export function parseLocalSkillOptions(
 
   return {
     args,
+    ...(contextFile ? { contextFile } : {}),
     replayDir: noRecord
       ? ""
       : replayDir ||
@@ -79,4 +91,23 @@ export function parseLocalSkillOptions(
           defaults.now ?? new Date(),
         ),
   };
+}
+
+export async function readRunNotes(file?: string): Promise<string> {
+  if (!file) return "";
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(file);
+  } catch {
+    throw new Error("Could not read --context-file. Supply a readable UTF-8 text file.");
+  }
+  if (bytes.length > 16000) throw new Error("--context-file must be at most 16000 bytes.");
+  let notes: string;
+  try {
+    notes = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+  } catch {
+    throw new Error("--context-file must contain UTF-8 text.");
+  }
+  if (!notes) throw new Error("--context-file must not be empty.");
+  return notes;
 }

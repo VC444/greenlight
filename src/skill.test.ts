@@ -202,7 +202,7 @@ test("skill runner isolates npm cache, cleans up on failure, and honors cache ov
   const temp = path.join(root, "temporary files");
   mkdirSync(temp);
   const run = (extra: Record<string, string> = {}) => spawnSync("/bin/bash", [
-    path.resolve("skills/greenlight/scripts/run-greenlight.sh"), "init",
+    path.resolve("skills/greenlight/scripts/run-greenlight.sh"), "pr", "preview",
   ], {
     encoding: "utf8",
     env: {
@@ -222,6 +222,9 @@ test("skill runner isolates npm cache, cleans up on failure, and honors cache ov
       assert.match(path.basename(cache), /^greenlight-npm-/);
       assert.equal(existsSync(cache), false, "temporary cache must be cleaned up");
     }
+    const silentFailure = run({ NPX_EXIT_CODE: "128" });
+    assert.equal(silentFailure.status, 128);
+    assert.match(silentFailure.stderr, /Greenlight: runtime could not start \(npx exit 128\)/);
     for (const key of ["npm_config_cache", "NPM_CONFIG_CACHE"]) {
       const cache = path.join(root, key);
       const result = run({ [key]: cache });
@@ -231,6 +234,43 @@ test("skill runner isolates npm cache, cleans up on failure, and honors cache ov
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill init prompts and saves without npx for Codex and Claude Code", async () => {
+  const script = path.resolve("skills/greenlight/scripts/run-greenlight.sh");
+  for (const hostEnv of [{ CODEX_SESSION_ID: "test-session" }, { CLAUDECODE: "1" }]) {
+    const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-offline-init-"));
+    const run = (...args: string[]) => spawnSync("/bin/bash", [script, "init", ...args], {
+      encoding: "utf8",
+      env: {
+        HOME: homeDir,
+        PATH: "/usr/bin:/bin",
+        GREENLIGHT_NODE_PATH: process.execPath,
+        GREENLIGHT_NPX_PATH: "/missing/npx",
+        ...hostEnv,
+      },
+    });
+    try {
+      const prompt = run();
+      assert.equal(prompt.status, 0, prompt.stderr);
+      assert.match(prompt.stdout, /What steps should Greenlight follow/);
+      const setupFile = path.join(homeDir, "input.json");
+      writeFileSync(setupFile, '{"version":2}');
+      const invalid = run("--setup-file", setupFile);
+      assert.equal(invalid.status, 1);
+      assert.equal(existsSync(path.join(homeDir, ".greenlight/setup.yaml")), false);
+      writeFileSync(setupFile, JSON.stringify({ version: 1, steps: [], ready: {
+        condition: "Console usable", timeout_ms: 10_000,
+      } }));
+      const saved = run("--setup-file", setupFile);
+      assert.equal(saved.status, 0, saved.stderr);
+      assert.match(saved.stdout, /Greenlight setup saved/);
+      assert.equal((await readSetup(homeDir))?.includes("Console usable"), true);
+      const repeat = run();
+      assert.equal(repeat.status, 0, repeat.stderr);
+      assert.match(repeat.stdout, /Kept your edits unchanged/);
+    } finally { rmSync(homeDir, { recursive: true, force: true }); }
   }
 });
 
@@ -771,9 +811,9 @@ test("runs the existing planner and browser with GET-only GitHub access", async 
   assert.deepEqual(progress, [
     "Checking GitHub and model access...",
     "Reading pull request changes...",
+    "Looking for ~/.greenlight/setup.yaml...",
     "Planning browser checks...",
     `Plan ready: ${plan.items.length} checks.`,
-    "Looking for ~/.greenlight/setup.yaml...",
     "Check 1/1: pass.",
   ]);
   assert.doesNotMatch(report, /Reading pull request changes|Check 1\/1: pass/);
@@ -1459,4 +1499,194 @@ test("GitHub results include the PM review without changing the check conclusion
   assert.equal(writes[0]!.conclusion, "success");
   assert.ok(writes[0]!.output.text.includes(pmReview.concerns[0]!.concern));
   assert.ok(writes[1]!.body.includes(pmReview.concerns[0]!.concern));
+});
+
+test("missing prerequisites return questions before browser access and answers reach fresh planning", async () => {
+  const args = ["https://github.com/owner/repo/pull/1", "https://preview.example"];
+  let gathers = 0;
+  let executions = 0;
+  const question = "Which failed import should I use to check retry?";
+  const overrides = dependencies([], {
+    readSetup: async () => "Select test workspace",
+    gatherContext: async () => { gathers++; return context; },
+    generatePlan: async (_context, runContext) => {
+      assert.equal(runContext?.setup, "Select test workspace");
+      if (!runContext?.notes) return { ...plan, questions: [question] };
+      assert.match(runContext.notes, /Sample import/);
+      return { ...plan, questions: [] };
+    },
+    browserAvailable: async () => { assert.equal(gathers, 2); return true; },
+    executePlan: async () => { executions++; return result; },
+  });
+  const response = await runGreenlightSkill(args, overrides);
+  assert.ok(response.startsWith("[Greenlight input required]\n"));
+  assert.deepEqual(JSON.parse(response.split("\n")[1]!).questions, [question]);
+  assert.equal(executions, 0);
+  const report = await runGreenlightSkill(args, { ...overrides, runNotes: `${question}\nUse Sample import.` });
+  assert.equal(gathers, 2);
+  assert.equal(executions, 1);
+  assert.match(report, /1 passed/);
+});
+
+test("run-context option and file validation preserve notes without accepting invalid input", async () => {
+  const { readRunNotes } = await import("./skillOptions.js");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "greenlight-notes-"));
+  const file = path.join(directory, "context.txt");
+  const args = ["https://github.com/owner/repo/pull/1", "https://preview.example"];
+  try {
+    assert.equal(await readRunNotes(), "");
+    writeFileSync(file, "Use Sample import.\nRole: editor.");
+    const options = parseLocalSkillOptions([...args, "--context-file", file, "--no-record"]);
+    assert.deepEqual(options.args, args);
+    assert.equal(options.replayDir, "");
+    assert.equal(await readRunNotes(options.contextFile), "Use Sample import.\nRole: editor.");
+    assert.equal(parseLocalSkillOptions([...args, `--context-file=${file}`]).contextFile, file);
+    assert.throws(() => parseLocalSkillOptions([...args, "--context-file", "relative.txt"]), /absolute path/);
+    assert.throws(() => parseLocalSkillOptions([...args, "--context-file"]), /absolute path/);
+    assert.throws(() => parseLocalSkillOptions([...args, "--context-file", file, "--context-file", file]), /only once/);
+    for (const value of [" ", Buffer.from([255]), "x".repeat(16001)]) {
+      writeFileSync(file, value);
+      await assert.rejects(readRunNotes(file), /--context-file/);
+    }
+    await assert.rejects(readRunNotes(path.join(directory, "missing")), /Could not read/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("starting-state verification gates real item execution and leaves regressions to the judge", async () => {
+  const { runItem } = await import("./execute.js");
+  const events: string[] = [];
+  const page = {
+    on: () => {}, off: () => {},
+    goto: async () => { events.push("navigate"); },
+    waitForLoadState: async () => {}, evaluate: async () => "ready",
+  };
+  const item = {
+    ...plan.items[0]!,
+    startingState: { steps: ["Open Sample import"], condition: "Sample import has failed rows" },
+  };
+  let preparationSucceeds = true;
+  let inspectionSucceeds = true;
+  const driver = {
+    act: async (step: string) => {
+      events.push(step);
+      return { success: preparationSucceeds };
+    },
+    extract: async (prompt: string) => {
+      if (prompt.includes("Condition:")) {
+        events.push("verify prerequisite");
+        assert.match(prompt, /Sample import has failed rows/);
+        if (!inspectionSucceeds) throw new Error("Cannot inspect prerequisite");
+        return { status: "satisfied", reason: "Failed rows visible" };
+      }
+      events.push("judge behavior");
+      return { verdict: "fail", reasoning: "The changed behavior is broken" };
+    },
+  };
+  const check = () => runItem(driver as never, page as never, "https://preview.example", item, null);
+  const verified = await check();
+  assert.deepEqual(events, ["navigate", "Open Sample import", "verify prerequisite", ...item.steps, "judge behavior"]);
+  assert.equal(verified.verdict, "fail");
+  assert.equal(verified.error, null);
+
+  events.length = 0;
+  preparationSucceeds = false;
+  const failedAction = await check();
+  assert.equal(failedAction.verdict, "uncertain");
+  assert.match(failedAction.error!, /^Prerequisite blocked:/);
+  assert.deepEqual(events, ["navigate", "Open Sample import"]);
+
+  events.length = 0;
+  preparationSucceeds = true;
+  inspectionSucceeds = false;
+  const missing = await check();
+  assert.equal(missing.verdict, "uncertain");
+  assert.match(missing.error!, /^Prerequisite blocked:/);
+  assert.deepEqual(events, ["navigate", "Open Sample import", "verify prerequisite"]);
+
+  events.length = 0;
+  const unavailable = await runItem(driver as never, page as never, "https://preview.example", {
+    ...item, blockedReason: "No failed import is available; user asked to skip.",
+  }, null);
+  assert.equal(unavailable.verdict, "uncertain");
+  assert.match(unavailable.error!, /No failed import is available/);
+  assert.deepEqual(events, []);
+});
+
+test("local planner schema requires prerequisite decisions and targeted questions", async () => {
+  const { LocalTestPlanSchema } = await import("./testplan.js");
+  const local = {
+    ...plan, pmReview: { concerns: [], limitation: null }, questions: [],
+    items: plan.items.map(item => ({ ...item, startingState: null, blockedReason: null })),
+  };
+  assert.equal(LocalTestPlanSchema.safeParse(local).success, true);
+  assert.equal(LocalTestPlanSchema.safeParse({ ...local, questions: undefined }).success, false);
+  assert.equal(LocalTestPlanSchema.safeParse({ ...local, questions: ["a", "b", "c", "d"] }).success, false);
+  assert.equal(LocalTestPlanSchema.safeParse({ ...local, items: plan.items }).success, false);
+});
+
+test("unavailable prerequisites produce a final inconclusive report without requiring Chrome", async () => {
+  const report = await runGreenlightSkill(
+    ["https://github.com/owner/repo/pull/1", "https://preview.example"],
+    dependencies([], {
+      runNotes: "No failed import available. Skip retry.",
+      generatePlan: async () => ({
+        ...plan, questions: [],
+        items: plan.items.map(item => ({ ...item, blockedReason: "No failed import is available." })),
+      }),
+      browserAvailable: async () => { assert.fail("No browser needed for blocked checks"); },
+      executePlan: async () => { assert.fail("Blocked checks must not execute"); },
+    }),
+  );
+  assert.match(report, /1 inconclusive/);
+  assert.match(report, /Prerequisite blocked: No failed import is available/);
+});
+
+test("real subscription planner carries run context and preserves the Action schema", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "greenlight-local-planner-"));
+  try {
+    const cli = path.join(directory, "claude");
+    writeFileSync(cli, `#!${process.execPath}
+let input = "";
+process.stdin.on("data", chunk => { input += chunk; });
+process.stdin.on("end", () => {
+  const args = process.argv.slice(2);
+  const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]);
+  const local = Boolean(schema.properties.questions);
+  const answered = input.includes("Use Sample import.");
+  if (local && !input.includes("Select test workspace")) process.exit(8);
+  const output = ${JSON.stringify({ ...plan, pmReview: { concerns: [], limitation: null } })};
+  if (local) {
+    output.questions = answered ? [] : ["Which failed import should I use?"];
+    output.items = output.items.map(item => ({
+      ...item, blockedReason: null,
+      startingState: answered ? { steps: ["Open Sample import"], condition: "Failed rows visible" } : null,
+    }));
+  }
+  console.log(JSON.stringify({ type: "result", subtype: "success", structured_output: output }));
+});
+`);
+    chmodSync(cli, 0o755);
+    const script = `
+      import assert from "node:assert/strict";
+      import { generateTestPlan } from ${JSON.stringify(new URL("./testplan.ts", import.meta.url).href)};
+      const context = ${JSON.stringify(context)};
+      const waiting = await generateTestPlan(context, { setup: "Select test workspace", notes: "" });
+      assert.deepEqual(waiting.questions, ["Which failed import should I use?"]);
+      const ready = await generateTestPlan(context, { setup: "Select test workspace", notes: "Use Sample import." });
+      assert.deepEqual(ready.questions, []);
+      assert.equal(ready.items[0].startingState.condition, "Failed rows visible");
+      const action = await generateTestPlan(context);
+      assert.equal(action.questions, undefined);
+      assert.equal(action.items[0].startingState, undefined);
+    `;
+    const run = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      encoding: "utf8", timeout: 15000,
+      env: { ...process.env, PATH: directory, GREENLIGHT_LOCAL_AGENT: "claude" },
+    });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

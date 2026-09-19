@@ -1,4 +1,4 @@
-import { parseLocalSkillOptions } from "./skillOptions.js";
+import { parseLocalSkillOptions, readRunNotes } from "./skillOptions.js";
 import { subscriptionBackend } from "./subscriptionCli.js";
 
 process.env.GREENLIGHT_LOCAL_BROWSER = "1";
@@ -17,6 +17,7 @@ try {
     console.log(await runGreenlightInit(parseInitOptions(input.slice(1))));
   } else {
     const options = parseLocalSkillOptions(input);
+    const runNotes = await readRunNotes(options.contextFile);
     process.env.GREENLIGHT_REPLAY_DIR = options.replayDir;
     const { runGreenlightSkill } = await import("./skill.js");
     let currentStage = "Starting Greenlight...";
@@ -35,7 +36,7 @@ try {
     }, 25_000);
     heartbeat.unref();
     try {
-      const report = await runGreenlightSkill(options.args, { onProgress });
+      const report = await runGreenlightSkill(options.args, { onProgress, runNotes });
       console.log(report);
     } finally {
       clearInterval(heartbeat);

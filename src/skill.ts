@@ -8,7 +8,7 @@ import { gatherPrContext } from "./context.js";
 import { runPlan } from "./execute.js";
 import { renderNothingToTest } from "./comment.js";
 import { renderResultsComment } from "./results.js";
-import { generateTestPlan, type TestPlan } from "./testplan.js";
+import { generateTestPlan, type TestPlan, type RunContext } from "./testplan.js";
 import type { PullRequestJob } from "./job.js";
 import {
   subscriptionBackend,
@@ -46,6 +46,7 @@ type GitHubClient = Parameters<typeof gatherPrContext>[0];
 type CommandRunner = (file: string, args: string[]) => Promise<string>;
 
 export interface SkillDependencies {
+  runNotes?: string;
   onProgress?: (message: string) => void;
   env: NodeJS.ProcessEnv;
   resolveToken: (hostname: string) => Promise<string>;
@@ -54,6 +55,7 @@ export interface SkillDependencies {
   readSetup: typeof readSetup;
   generatePlan: (
     context: Awaited<ReturnType<typeof gatherPrContext>>,
+    runContext?: RunContext,
   ) => Promise<TestPlan | null>;
   executePlan: typeof runPlan;
   browserAvailable: () => Promise<boolean>;
@@ -376,10 +378,19 @@ export async function runGreenlightSkill(
     );
   }
 
+  progress?.(`Looking for ${SETUP_PATH}...`);
+  let setup: string | null;
+  try {
+    setup = await dependencies.readSetup();
+  } catch (error) {
+    throw new SkillError(error instanceof Error ? error.message : "Could not load browser setup.");
+  }
+  if (setup) progress?.(`Loaded local setup from ${SETUP_PATH}.`);
+
   let plan: TestPlan | null;
   try {
     progress?.("Planning browser checks...");
-    plan = await dependencies.generatePlan(context);
+    plan = await dependencies.generatePlan(context, { setup, notes: dependencies.runNotes ?? "" });
   } catch (error) {
     if (error instanceof SubscriptionRequestError) {
       throw new SkillError(`Could not generate the Greenlight test plan: ${error.message}`);
@@ -394,19 +405,32 @@ export async function runGreenlightSkill(
     );
   }
 
+  if (plan.questions?.length) {
+    progress?.("Waiting for prerequisite details. Browser checks have not started.");
+    return "[Greenlight input required]\n" + JSON.stringify({
+      questions: plan.questions,
+      summary: plan.summary,
+    });
+  }
+
   progress?.(`Plan ready: ${plan.items.length} checks.`);
   if (plan.items.length === 0) {
     return appendActionPrompt(renderNothingToTest(plan, headSha));
   }
 
-  progress?.(`Looking for ${SETUP_PATH}...`);
-  let setup: string | null;
-  try {
-    setup = await dependencies.readSetup();
-  } catch (error) {
-    throw new SkillError(error instanceof Error ? error.message : "Could not load browser setup.");
+  if (plan.items.every(item => item.blockedReason)) {
+    return appendActionPrompt(renderResultsComment(plan, {
+      replayUrl: undefined,
+      items: plan.items.map(item => ({
+        intent: item.intent,
+        route: item.route,
+        verdict: "uncertain",
+        reasoning: "",
+        consoleErrors: [],
+        error: `Prerequisite blocked: ${item.blockedReason}`,
+      })),
+    }, headSha, null, "local"));
   }
-  if (setup) progress?.(`Loaded local setup from ${SETUP_PATH}.`);
 
   if (!(await dependencies.browserAvailable())) {
     throw new SkillError(

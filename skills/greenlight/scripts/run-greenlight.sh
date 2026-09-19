@@ -66,6 +66,11 @@ else
   exit 1
 fi
 
+if [[ "${1:-}" == "init" ]]; then
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  exec "$node_bin" "$script_dir/init.mjs" "${@:2}"
+fi
+
 npx_bin="${GREENLIGHT_NPX_PATH:-$(command -v npx || true)}"
 if [[ -z "$npx_bin" ]]; then
   echo "Greenlight: npx was not found. Install Node.js 22.20 or newer with npm." >&2
@@ -73,8 +78,20 @@ if [[ -z "$npx_bin" ]]; then
 fi
 
 runtime_package="${GREENLIGHT_RUNTIME_PACKAGE:-github:VC444/greenlight#main}"
+run_runtime() {
+  local status
+  if "$npx_bin" --yes --package "$runtime_package" greenlight "$@"; then
+    return 0
+  else
+    status=$?
+  fi
+  echo "Greenlight: runtime could not start (npx exit $status). Check access to GitHub and the npm registry, then retry." >&2
+  return "$status"
+}
+
 if [[ -n "${npm_config_cache:-}${NPM_CONFIG_CACHE:-}" ]]; then
-  exec "$npx_bin" --yes --package "$runtime_package" greenlight "$@"
+  run_runtime "$@"
+  exit $?
 fi
 
 # Agent sandboxes may block the home cache even when its ownership is correct.
@@ -85,4 +102,4 @@ if ! runtime_cache="$(mktemp -d "${TMPDIR:-/tmp}/greenlight-npm-XXXXXX")"; then
 fi
 trap 'rm -rf -- "$runtime_cache"' EXIT
 export npm_config_cache="$runtime_cache"
-"$npx_bin" --yes --package "$runtime_package" greenlight "$@"
+run_runtime "$@"

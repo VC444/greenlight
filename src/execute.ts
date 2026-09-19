@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { applySetup, SetupBlockedError, SetupDecisionSchema } from "./setup.js";
+import { applySetup, applyStartingState, PrerequisiteBlockedError, SetupBlockedError, SetupDecisionSchema } from "./setup.js";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { generateText, Output } from "ai";
 import { z } from "zod";
@@ -239,7 +239,7 @@ export async function runPlan(
       const evidence = await runItem(stagehand, page, previewUrl, item, visualJudge,
         onProgress ? (message) => onProgress(`${label}: ${message}`) : undefined, setup);
       items.push(evidence);
-      onProgress?.(`${label}: ${evidence.error?.startsWith("Setup blocked:") ? "setup blocked" : evidence.error ? "uncertain (execution error)" : evidence.verdict}.`);
+      onProgress?.(`${label}: ${evidence.error?.startsWith("Setup blocked:") ? "setup blocked" : evidence.error?.startsWith("Prerequisite blocked:") ? "prerequisite blocked" : evidence.error ? "uncertain (execution error)" : evidence.verdict}.`);
       // Drained per item, not per run: the recorder restarts on every full page
       // load, so the buffer only ever holds the current document's events.
       if (isRecording()) {
@@ -356,7 +356,7 @@ async function judgeFromScreenshot(
   }
 }
 
-async function runItem(
+export async function runItem(
   stagehand: Stagehand,
   page: StagehandPage,
   previewUrl: string,
@@ -377,6 +377,7 @@ async function runItem(
   let judgedVisually = false;
 
   try {
+    if (item.blockedReason) throw new PrerequisiteBlockedError(item.blockedReason);
     const target = withBypass(new URL(item.route, previewUrl).toString());
     // Two-phase navigation. The hard gate is DOM-ready: act and the judge read
     // the DOM/a11y tree, so this is all correctness needs — and on a cold
@@ -403,6 +404,16 @@ async function runItem(
         act: async (instruction) => {
           const outcome = await stagehand.act(instruction);
           if (!outcome.success) throw new SetupBlockedError("The requested UI action could not be completed.");
+        },
+      }, onProgress);
+    }
+
+    if (item.startingState) {
+      await applyStartingState(item.startingState, {
+        inspect: (prompt) => stagehand.extract(prompt, SetupDecisionSchema),
+        act: async (instruction) => {
+          const outcome = await stagehand.act(instruction);
+          if (!outcome.success) throw new Error("The requested preparation action could not be completed.");
         },
       }, onProgress);
     }
@@ -465,7 +476,7 @@ async function runItem(
     verdict = final.verdict === "cannot_tell" ? "uncertain" : final.verdict;
     reasoning = final.reasoning;
   } catch (e) {
-    if (e instanceof SetupBlockedError) onProgress?.(e.message);
+    if (e instanceof SetupBlockedError || e instanceof PrerequisiteBlockedError) onProgress?.(e.message);
     error = e instanceof Error ? e.message : String(e);
   } finally {
     page.off("console", onConsole);

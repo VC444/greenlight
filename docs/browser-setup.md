@@ -14,7 +14,7 @@ Initialization does not inspect source code or infer setup steps.
 
 Review the saved recipe before running checks; it has not been
 browser-verified. Credentials, MFA, and external sign-in requirements need
-manual preparation. Running `init` again displays your existing valid setup
+manual preparation. Running `init` again displays your existing setup
 without overwriting edits. You can also write the file yourself using the
 schema below.
 
@@ -99,3 +99,32 @@ or oversized file stops the run.
 
 Existing recipes containing `skip_if` are rejected as invalid. Remove that
 field before running checks; every remaining step is required.
+
+## PR-specific starting states
+
+Local runs identify prerequisites while planning, using the PR description,
+linked issue, common setup, and any notes supplied for that run. When a check
+needs missing data or state, Greenlight asks targeted questions in chat before
+opening the browser. Simple checks proceed without questions.
+
+For example: "Which failed import should I use to check retry?" Supply an
+existing example and where to find it, or instructions for creating it through
+ordinary UI actions. You can also supply notes upfront with
+`--context-file /tmp/greenlight-context.txt`, or describe them when invoking the
+skill. The agent passes chat answers through a temporary context file. Notes
+are sent to the configured model backend, are limited to 16000 UTF-8 bytes,
+and apply only to the current run. Keep credentials out of them.
+
+Greenlight prepares and verifies each check's starting state after common
+setup, before exercising the changed behavior. Readiness observation has a
+60-second deadline; preparation actions use the browser action timeout.
+Preparation appears in the replay. A missing or unverified prerequisite is
+reported as inconclusive with `Prerequisite blocked`.
+
+If you cannot supply a prerequisite, say so or ask to skip the affected check.
+It remains inconclusive in the report while other checks can run. File uploads,
+backend seeding, and account configuration require manual preparation in this
+version. Provide the resulting record's visible location when it is ready.
+Each reply triggers fresh planning against the current PR, so a changed PR
+can lead to new questions. This conversation is supported by the local skill;
+the GitHub Action does not ask prerequisite questions.
