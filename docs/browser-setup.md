@@ -21,7 +21,21 @@ schema below.
 The local skill reads this file automatically, regardless of the working
 directory. One setup applies to every repository you check, so update it when
 switching apps. The file stays outside your repository and is not shared with
-teammates. Its contents are sent to your configured model backend for setup.
+teammates.
+
+Greenlight checks exact visibility conditions such as `the link labeled
+"See Examples" is visible` and `the text "Ready" is visible` using Playwright's
+role and text locators on the same browser page used by Stagehand. These checks
+use Playwright's accessible-name matching and visibility rules without model
+inference. Greenlight retries unsatisfied conditions until the setup deadline.
+Conditions outside this narrow grammar use Stagehand's AI-powered extraction.
+All actions use Stagehand, preserving the original instruction, including the
+difference between clicking a checkbox and ensuring it is checked.
+
+Failed checks include bounded execution diagnostics showing the strategy used,
+match and visibility counts for deterministic conditions, and action failures.
+Page HTML, credentials, cookies, request headers, and form values are not included
+in those diagnostics.
 
 ## Schema
 

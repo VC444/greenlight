@@ -17,6 +17,7 @@
     "src/preview.ts",
     "src/recorder.ts",
     "src/results.ts",
+    "src/semantic.ts",
     "src/skill.ts",
     "src/setup.ts",
     "src/init.ts",
@@ -31,6 +32,7 @@
   "scripts": {
     "test": "node --import tsx --test src/skill.test.ts",
     "typecheck": "tsc --noEmit",
+    "test:browser": "node --import tsx --test src/semantic.browser.test.ts",
     "preversion": "pnpm typecheck",
     "version": "node scripts/pin-readme-version.mjs && git add README.md",
     "postversion": "git push --follow-tags"

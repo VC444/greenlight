@@ -65,6 +65,20 @@ function renderItems(items: ItemEvidence[]): string {
           `  <sub>${item.consoleErrors.length} console error(s) during this journey</sub>`,
         );
       }
+      if (item.error && item.diagnostics?.length) {
+        lines.push("  <details><summary>Execution diagnostics</summary>", "");
+        for (const diagnostic of item.diagnostics.slice(-8)) {
+          const counts = diagnostic.matchCount === undefined
+            ? ""
+            : `; matches ${diagnostic.matchCount}, visible ${diagnostic.visibleCount ?? 0}`;
+          const attempts = diagnostic.attempts && diagnostic.attempts > 1
+            ? `; observed ${diagnostic.attempts} times`
+            : "";
+          const reason = diagnostic.reason ? `; ${diagnostic.reason}` : "";
+          lines.push(`  - ${diagnostic.phase} via ${diagnostic.strategy}: ${diagnostic.outcome}${counts}${attempts}${reason}`);
+        }
+        lines.push("", "  </details>");
+      }
       return lines.join("\n");
     })
     .join("\n");

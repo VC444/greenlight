@@ -31,6 +31,9 @@ import {
 } from "./subscriptionCli.js";
 import type { TestPlan } from "./testplan.js";
 import {
+  compileSemanticCondition,
+} from "./semantic.js";
+import {
   ACTION_PROMPT,
   SkillError,
   parsePreviewUrl,
@@ -1249,6 +1252,37 @@ const structuredSetup = JSON.stringify({
   ready: { condition: "Console usable", timeout_ms: 1000 },
 });
 
+test("semantic compiler recognizes exact visibility conditions only", () => {
+  assert.deepEqual(
+    compileSemanticCondition('The link labeled "See Examples" is visible.'),
+    { target: { role: "link", name: "See Examples", exact: true }, visible: true },
+  );
+  assert.deepEqual(
+    compileSemanticCondition('The text "Ready" is absent.'),
+    { target: { role: "text", name: "Ready", exact: true }, visible: false },
+  );
+  assert.equal(compileSemanticCondition("The workspace is ready"), null);
+});
+
+test("unsupported setup language falls back to the existing Stagehand AI driver", async () => {
+  const events: string[] = [];
+  await applySetup(structuredSetup, {
+    inspectSemantic: async () => null,
+    inspect: async (prompt) => {
+      events.push(prompt.includes("Welcome visible") ? "ai wait" : prompt.includes("Welcome closed") ? "ai verify" : "ai ready");
+      return { status: "satisfied", reason: "Observed by Stagehand" };
+    },
+    act: async action => { events.push(`ai action: ${action}`); },
+  });
+  assert.deepEqual(events, [
+    "ai wait",
+    "ai action: Ensure acknowledgment is checked",
+    "ai action: Click Continue",
+    "ai verify",
+    "ai ready",
+  ]);
+});
+
 test("setup waits for a delayed modal and resolves steps before checking readiness", async () => {
   const events: string[] = [];
   let welcomeInspections = 0;
@@ -1614,6 +1648,55 @@ test("starting-state verification gates real item execution and leaves regressio
   assert.deepEqual(events, []);
 });
 
+test("common setup runs at the supplied preview before item-route navigation", async () => {
+  const { runItem } = await import("./execute.js");
+  const events: string[] = [];
+  const page = {
+    on: () => {}, off: () => {},
+    goto: async (url: string) => { events.push(`navigate ${new URL(url).pathname}`); },
+    waitForLoadState: async () => {},
+    evaluate: async () => "ready",
+    locator: () => ({ click: async () => {} }),
+  };
+  const item = {
+    ...plan.items[0]!,
+    route: "/app",
+    steps: ['Observe the description displayed with the "Impressionist" style.'],
+  };
+  const driver = {
+    act: async (step: string) => { events.push(`act ${step}`); return { success: true }; },
+    extract: async (prompt: string) => {
+      if (prompt.includes("Condition:")) {
+        events.push("inspect setup");
+        return { status: "satisfied", reason: "Visible" };
+      }
+      events.push("judge result");
+      return { verdict: "pass", reasoning: "Description visible" };
+    },
+  };
+  const evidence = await runItem(
+    driver as never,
+    page as never,
+    "https://preview.example/",
+    item,
+    null,
+    undefined,
+    structuredSetup,
+  );
+  assert.equal(evidence.verdict, "pass");
+  assert.deepEqual(events, [
+    "navigate /",
+    "inspect setup",
+    "act Ensure acknowledgment is checked",
+    "act Click Continue",
+    "inspect setup",
+    "inspect setup",
+    "navigate /app",
+    `act ${item.steps[0]}`,
+    "judge result",
+  ]);
+});
+
 test("local planner schema requires prerequisite decisions and targeted questions", async () => {
   const { LocalTestPlanSchema } = await import("./testplan.js");
   const local = {
@@ -1689,4 +1772,30 @@ process.stdin.on("end", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("item actions preserve checkbox and ambiguous-control instructions for Stagehand", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = {
+    on: () => {}, off: () => {}, goto: async () => {},
+    waitForLoadState: async () => {}, evaluate: async () => "ready",
+  };
+  const steps = ['Click the checkbox labeled "I agree".', 'Ensure "I agree" is checked.', 'Click the button named "Delete".'];
+  const received: string[] = [];
+  const stagehand = {
+    act: async (instruction: string, options: { page: unknown }) => {
+      assert.equal(options.page, page);
+      received.push(instruction);
+      return { success: true };
+    },
+    extract: async (_prompt: string, _schema: unknown, options: { page: unknown }) => {
+      assert.equal(options.page, page);
+      return { verdict: "pass", reasoning: "Verified" };
+    },
+  };
+  const evidence = await runItem(stagehand as never, page as never,
+    "https://preview.example", { ...plan.items[0]!, steps }, null);
+  assert.equal(evidence.error, null);
+  assert.deepEqual(received, steps);
+  assert.deepEqual(evidence.diagnostics?.map(entry => entry.strategy), steps.map(() => "stagehand_ai"));
 });

@@ -1,5 +1,6 @@
 import "dotenv/config";
-import { applySetup, applyStartingState, PrerequisiteBlockedError, SetupBlockedError, SetupDecisionSchema } from "./setup.js";
+import { applySetup, applyStartingState, PrerequisiteBlockedError, SetupBlockedError, SetupDecisionSchema, type SetupDriver } from "./setup.js";
+import { chromium, type Browser, type Page } from "playwright-core";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { generateText, Output } from "ai";
 import { z } from "zod";
@@ -28,6 +29,7 @@ import {
   writeReplay,
   type ItemRecording,
 } from "./recorder.js";
+import { createSemanticDriver, type BrowserDiagnostic } from "./semantic.js";
 
 // Plan steps assume a desktop layout (the nav collapses under ~768px); use a
 // comfortable desktop size so responsive UIs render their full-width state.
@@ -46,7 +48,7 @@ function dbg(message: string): void {
 /** What the page looks like right now: readyState + image progress. Raced with
  *  a short timeout so a driver that queues evaluate behind page settling can't
  *  stall the probe — that timeout itself is the interesting signal. */
-async function pageState(page: StagehandPage): Promise<string> {
+async function pageState(page: Page): Promise<string> {
   const probe = page.evaluate<string>(
     `(() => {
       const imgs = Array.from(document.images);
@@ -113,6 +115,7 @@ export interface ItemEvidence {
   reasoning: string;
   consoleErrors: string[];
   error: string | null;
+  diagnostics?: BrowserDiagnostic[];
 }
 
 export interface ExecutionResult {
@@ -207,6 +210,7 @@ export async function runPlan(
     },
   });
 
+  let browser: Browser | undefined;
   try {
     onProgress?.("Starting Chrome...");
     await stagehand.init();
@@ -225,9 +229,11 @@ export async function runPlan(
       : ", no visual judge";
     console.log(`browser session (model ${modelLabel}${judgeNote})`);
 
-    const page =
-      stagehand.context.activePage() ?? (await stagehand.context.newPage());
-    await page.setViewportSize(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
+    browser = await chromium.connectOverCDP(stagehand.connectURL());
+    const context = browser.contexts()[0];
+    if (!context) throw new Error("The browser has no default context.");
+    const page = context.pages()[0] ?? await context.newPage();
+    await page.setViewportSize(DESKTOP_VIEWPORT);
     await page.addInitScript(DIALOG_SUPPRESS);
     if (isRecording()) await page.addInitScript(recorderInitScript());
 
@@ -263,13 +269,62 @@ export async function runPlan(
     );
     return null;
   } finally {
+    await browser?.close().catch(() => {});
     await stagehand.close().catch(() => {});
     releaseSlot();
   }
 }
 
-type StagehandPage = ReturnType<typeof Stagehand.prototype.context.activePage> &
-  object;
+function setupDriver(
+  stagehand: Stagehand,
+  page: Page,
+  semantic: ReturnType<typeof createSemanticDriver>,
+  record: (diagnostic: BrowserDiagnostic) => void,
+): SetupDriver {
+  return {
+    inspectSemantic: semantic.inspect,
+    inspect: async (prompt) => {
+      const started = performance.now();
+      try {
+        const decision = await stagehand.extract(prompt, SetupDecisionSchema, { page });
+        record({
+          phase: "condition", strategy: "stagehand_ai", instruction: prompt,
+          outcome: decision.status, reason: decision.reason,
+          durationMs: Math.round(performance.now() - started),
+        });
+        return decision;
+      } catch (error) {
+        record({
+          phase: "condition", strategy: "stagehand_ai", instruction: prompt,
+          outcome: "unknown", reason: "Stagehand could not inspect the condition.",
+          durationMs: Math.round(performance.now() - started),
+        });
+        throw error;
+      }
+    },
+    act: async (instruction) => {
+      const started = performance.now();
+      try {
+        const outcome = await stagehand.act(instruction, { page });
+        if (!outcome.success) throw new Error("The requested UI action could not be completed.");
+        record({
+          phase: "action", strategy: "stagehand_ai", instruction,
+          outcome: "completed",
+          reason: "Stagehand completed the action.",
+          durationMs: Math.round(performance.now() - started),
+        });
+        return outcome;
+      } catch (error) {
+        record({
+          phase: "action", strategy: "stagehand_ai", instruction,
+          outcome: "action_failed", reason: "Stagehand action failed.",
+          durationMs: Math.round(performance.now() - started),
+        });
+        throw error;
+      }
+    },
+  };
+}
 
 /**
  * Second-opinion judge for the DOM judge's blind spot: shows a model the page as
@@ -283,7 +338,7 @@ type StagehandPage = ReturnType<typeof Stagehand.prototype.context.activePage> &
  * basis for a visual judgment. Anything below the fold stays "cannot_tell".
  */
 async function judgeFromScreenshot(
-  page: StagehandPage,
+  page: Page,
   item: TestPlan["items"][number],
   judge: ActiveVisualJudge,
 ): Promise<z.infer<typeof JudgeSchema> | null> {
@@ -358,7 +413,7 @@ async function judgeFromScreenshot(
 
 export async function runItem(
   stagehand: Stagehand,
-  page: StagehandPage,
+  page: Page,
   previewUrl: string,
   item: TestPlan["items"][number],
   visualJudge: ActiveVisualJudge | null,
@@ -366,6 +421,23 @@ export async function runItem(
   setup?: string,
 ): Promise<ItemEvidence> {
   const consoleErrors: string[] = [];
+  const diagnostics: BrowserDiagnostic[] = [];
+  const recordDiagnostic = (diagnostic: BrowserDiagnostic) => {
+    const previous = diagnostics.at(-1);
+    if (previous && previous.phase === diagnostic.phase &&
+        previous.strategy === diagnostic.strategy &&
+        previous.instruction === diagnostic.instruction &&
+        previous.outcome === diagnostic.outcome &&
+        previous.matchCount === diagnostic.matchCount &&
+        previous.visibleCount === diagnostic.visibleCount &&
+        previous.reason === diagnostic.reason) {
+      previous.attempts = (previous.attempts ?? 1) + 1;
+      previous.durationMs += diagnostic.durationMs;
+      return;
+    }
+    diagnostics.push(diagnostic);
+    dbg(`browser diagnostic ${JSON.stringify(diagnostic)}`);
+  };
   const onConsole = (m: { type(): string; text(): string }) => {
     if (m.type() === "error") consoleErrors.push(m.text());
   };
@@ -379,43 +451,38 @@ export async function runItem(
   try {
     if (item.blockedReason) throw new PrerequisiteBlockedError(item.blockedReason);
     const target = withBypass(new URL(item.route, previewUrl).toString());
-    // Two-phase navigation. The hard gate is DOM-ready: act and the judge read
-    // the DOM/a11y tree, so this is all correctness needs — and on a cold
-    // preview (fresh profile, uncached /_next/image optimizations) full "load"
-    // can blow the whole timeout while the DOM has long been usable.
-    dbg(`goto ${target}`);
+    const setupTarget = withBypass(previewUrl);
+    // Common setup describes how to enter an application from its supplied
+    // preview, so it always runs at the preview root before item-specific route
+    // navigation. Starting-state preparation still runs on the item route.
+    const initialTarget = setup ? setupTarget : target;
+    const navigate = async (url: string) => {
+      // Two-phase navigation. DOM-ready is the correctness gate; asset loading
+      // gets a bounded, non-fatal grace period for useful visual evidence.
+      dbg(`goto ${url}`);
+      let started = Date.now();
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: NAV_TIMEOUT_MS,
+      });
+      dbg(`goto done in ${Date.now() - started}ms; page: ${await pageState(page)}`);
+      started = Date.now();
+      await page.waitForLoadState("load", { timeout: ASSET_SETTLE_MS }).catch(() => {});
+      dbg(`asset settle ended after ${Date.now() - started}ms; page: ${await pageState(page)}`);
+    };
+    await navigate(initialTarget);
     let t = Date.now();
-    await page.goto(target, {
-      waitUntil: "domcontentloaded",
-      timeoutMs: NAV_TIMEOUT_MS,
-    });
-    dbg(`goto done in ${Date.now() - t}ms; page: ${await pageState(page)}`);
-    // Then a bounded, non-fatal grace period for assets to finish, so the
-    // recording shows the page as a user would see it — the replay is what
-    // builds trust in the verdict. A page that never fires "load" costs this
-    // wait and nothing else; visual completeness must never abort an item.
-    t = Date.now();
-    await page.waitForLoadState("load", ASSET_SETTLE_MS).catch(() => {});
-    dbg(`asset settle ended after ${Date.now() - t}ms; page: ${await pageState(page)}`);
+
+    const semantic = createSemanticDriver(page, recordDiagnostic);
+    const driver = setupDriver(stagehand, page, semantic, recordDiagnostic);
 
     if (setup) {
-      await applySetup(setup, {
-        inspect: (prompt) => stagehand.extract(prompt, SetupDecisionSchema),
-        act: async (instruction) => {
-          const outcome = await stagehand.act(instruction);
-          if (!outcome.success) throw new SetupBlockedError("The requested UI action could not be completed.");
-        },
-      }, onProgress);
+      await applySetup(setup, driver, onProgress);
+      if (target !== initialTarget) await navigate(target);
     }
 
     if (item.startingState) {
-      await applyStartingState(item.startingState, {
-        inspect: (prompt) => stagehand.extract(prompt, SetupDecisionSchema),
-        act: async (instruction) => {
-          const outcome = await stagehand.act(instruction);
-          if (!outcome.success) throw new Error("The requested preparation action could not be completed.");
-        },
-      }, onProgress);
+      await applyStartingState(item.startingState, driver, onProgress);
     }
 
     // Perform each natural-language step. A step the model can't do (act throws)
@@ -424,7 +491,7 @@ export async function runItem(
       dbg(`act ${index + 1}/${item.steps.length}: ${step}`);
       t = Date.now();
       onProgress?.(`Running step ${index + 1}/${item.steps.length}...`);
-      await stagehand.act(step);
+      await driver.act(step);
       dbg(`act ${index + 1} done in ${Date.now() - t}ms`);
     }
     dbg(`judging; page: ${await pageState(page)}`);
@@ -445,6 +512,7 @@ export async function runItem(
         `contradicted, and "cannot_tell" if judging it would need something you ` +
         `cannot see.`,
       JudgeSchema,
+      { page },
     );
     dbg(`judge done in ${Date.now() - t}ms`);
     // "cannot_tell" is not a test failure — it's a blind spot of a DOM-only
@@ -498,5 +566,6 @@ export async function runItem(
     reasoning,
     consoleErrors,
     error,
+    diagnostics,
   };
 }
