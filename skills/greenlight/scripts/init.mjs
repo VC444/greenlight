@@ -79,7 +79,7 @@ async function main() {
     if (error.code !== "ENOENT") throw error;
   }
   if (process.argv.length === 2) {
-    console.log("What steps should Greenlight follow to prepare your app before testing? Describe them in order, including exact button or field labels and how to tell the app is ready. If no setup actions are needed, describe only the ready state. No setup file has been written.");
+    console.log("Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
     return;
   }
   if (process.argv.length !== 4 || process.argv[2] !== "--setup-file" ||

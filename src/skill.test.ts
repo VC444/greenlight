@@ -257,7 +257,7 @@ test("skill init prompts and saves without npx for Codex and Claude Code", async
     try {
       const prompt = run();
       assert.equal(prompt.status, 0, prompt.stderr);
-      assert.match(prompt.stdout, /What steps should Greenlight follow/);
+      assert.equal(prompt.stdout.trim(), "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
       const setupFile = path.join(homeDir, "input.json");
       writeFileSync(setupFile, '{"version":2}');
       const invalid = run("--setup-file", setupFile);
@@ -1412,7 +1412,7 @@ test("init prompts without creating a file and saves supplied steps unchanged", 
       assert.throws(() => parseInitOptions(args), /Usage/);
     }
     const prompt = await runGreenlightInit({ homeDir });
-    assert.match(prompt, /What steps should Greenlight follow/);
+    assert.equal(prompt, "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
     assert.equal(await readSetup(homeDir), null);
     const setupFile = path.join(homeDir, "supplied.yaml");
     writeFileSync(setupFile, structuredSetup);
@@ -1451,7 +1451,7 @@ test("CLI init prompts, saves user input, and preserves existing setup", () => {
   try {
     const prompt = run();
     assert.equal(prompt.status, 0, prompt.stderr);
-    assert.match(prompt.stdout, /What steps should Greenlight follow/);
+    assert.equal(prompt.stdout.trim(), "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
     const setupFile = path.join(homeDir, "supplied.yaml");
     writeFileSync(setupFile, "# My saved setup\n" + structuredSetup);
     const saved = run("--setup-file", setupFile);

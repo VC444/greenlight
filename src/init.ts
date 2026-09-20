@@ -31,9 +31,8 @@ export async function runGreenlightInit(
     return `## Your existing Greenlight setup\n\nSaved at ~/.greenlight/setup.yaml. Kept your edits unchanged.\n\n\`\`\`yaml\n${existing}\n\`\`\`\n\nEdit this file directly if you need to change the setup.`;
   }
   if (!options.setupFile) {
-    return "What steps should Greenlight follow to prepare your app before testing? " +
-      "Describe them in order, including exact button or field labels and how to tell the app is ready. " +
-      "If no setup actions are needed, describe only the ready state. No setup file has been written.";
+    return "Greenlight initialization. What should I do before I start testing your app? " +
+      "For example, log in or dismiss a welcome popup.";
   }
   const bytes = await readFile(options.setupFile);
   const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
