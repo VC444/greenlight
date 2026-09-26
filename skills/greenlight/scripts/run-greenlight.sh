@@ -48,6 +48,11 @@ if [[ -n "${PATH:-}" ]]; then
 fi
 export PATH="$runtime_path"
 
+if [[ "${1:-}" == "init" ]]; then
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  exec "$node_bin" "$script_dir/init.mjs" "${@:2}"
+fi
+
 codex_host=0
 claude_host=0
 if [[ -n "${CODEX_SESSION_ID:-}${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]]; then
@@ -64,11 +69,6 @@ elif [[ "$claude_host" == "1" && "$codex_host" == "0" ]]; then
 else
   echo "Greenlight: run this skill inside a Codex or Claude Code session." >&2
   exit 1
-fi
-
-if [[ "${1:-}" == "init" ]]; then
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-  exec "$node_bin" "$script_dir/init.mjs" "${@:2}"
 fi
 
 npx_bin="${GREENLIGHT_NPX_PATH:-$(command -v npx || true)}"

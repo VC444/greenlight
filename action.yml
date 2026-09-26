@@ -37,7 +37,7 @@ inputs:
   vercel-bypass-secret:
     description: >-
       Vercel "Protection Bypass for Automation" secret. Only needed when preview
-      deployments are protected — which is the default on Vercel Pro/Team.
+      deployments are protected; which is the default on Vercel Pro/Team.
     required: false
     default: ""
   executor-model:
@@ -58,17 +58,30 @@ inputs:
       already run: `executor-model` on anthropic/openai/google, a
       vision-capable model on fireworks. On together/openrouter it falls back
       to `executor-model` too, but an unnamed judge there can only pass an item,
-      never fail one — name a vision model here to give it the final word.
+      never fail one; name a vision model here to give it the final word.
       Set to "off" to skip the escalation and leave those items inconclusive.
     required: false
     default: ""
+  run-context:
+    description: >-
+      Optional test-data locations and preparation instructions for this run.
+      Sent to the model with PR context. Do not include credentials.
+    required: false
+    default: ""
+  setup-timeout-seconds:
+    description: >-
+      Deadline for each native setup invocation and each starting-state
+      condition, from 1 to 300 seconds. Setup timeout stops the browser
+      session; unfinished checks are inconclusive.
+    required: false
+    default: "60"
   pause-timeout-minutes:
     description: >-
       How long the run waits when someone unchecks the "Run these checks" box on
       the plan comment, before giving up and ending quietly. The run is the only
-      thing still listening for that box, so it stays alive to see it come back
-      — which costs runner minutes, but only when a human actually paused it. A
-      normal run never waits here at all.
+      thing still listening for that box, so it stays alive to see it come back.
+      This costs runner minutes only when a human pauses the run. A normal run
+      never waits here at all.
     required: false
     default: "30"
 
@@ -76,7 +89,7 @@ runs:
   using: composite
   steps:
     # `required: true` is not enforced for composite actions, and a workflow
-    # referencing a secret that was never created passes an empty string — fail
+    # referencing a secret that was never created passes an empty string; fail
     # loudly here rather than running a pipeline that can only stay silent.
     - name: Verify required inputs
       shell: bash
@@ -94,7 +107,7 @@ runs:
           exit 1
         fi
         # Workflow expressions have no arithmetic, so the minutes-to-ms
-        # conversion happens here — which means validating the input first,
+        # conversion happens here; which means validating the input first,
         # rather than letting bash choke on it.
         if ! printf '%s' "$PAUSE_MINUTES" | grep -Eq '^[0-9]+$'; then
           echo "::error::pause-timeout-minutes must be a whole number of minutes (got \"$PAUSE_MINUTES\")."
@@ -115,7 +128,7 @@ runs:
 
     # Stagehand's local mode launches Chrome through chrome-launcher, which finds
     # a browser via CHROME_PATH, then `which google-chrome|chromium`, then
-    # .desktop entries — it never looks in Playwright's cache. So: reuse whatever
+    # .desktop entries; it never looks in Playwright's cache. So: reuse whatever
     # the runner image already ships, and only download when there is nothing.
     - name: Resolve a browser
       shell: bash
@@ -123,7 +136,7 @@ runs:
       run: |
         CHROME_PATH="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || true)"
         if [ -z "$CHROME_PATH" ]; then
-          echo "no system Chrome — downloading one"
+          echo "no system Chrome; downloading one"
           npx playwright install --with-deps chromium
           CHROME_PATH="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm -u+x | head -1)"
         fi
@@ -147,6 +160,8 @@ runs:
         GREENLIGHT_HEADLESS: "1"
         GREENLIGHT_LLM_API_KEY: ${{ inputs.llm-api-key }}
         VERCEL_AUTOMATION_BYPASS_SECRET: ${{ inputs.vercel-bypass-secret }}
+        GREENLIGHT_RUN_CONTEXT: ${{ inputs.run-context }}
+        GREENLIGHT_SETUP_TIMEOUT_SECONDS: ${{ inputs.setup-timeout-seconds }}
         GREENLIGHT_MODEL: ${{ inputs.model }}
         GREENLIGHT_EXECUTOR_MODEL: ${{ inputs.executor-model }}
         GREENLIGHT_VISUAL_JUDGE_MODEL: ${{ inputs.visual-judge-model }}

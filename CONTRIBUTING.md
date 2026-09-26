@@ -1,9 +1,13 @@
 # Contributing to Greenlight
 
-Greenlight has no unit test suite. It is an agent that drives a real browser
-against a real deployed preview and asks a model what it sees, so the only
-verification that means anything is a full run against a live pull request.
-This document is how you get one running locally in about ten minutes.
+Development focuses on the GitHub Action. The local skill and subscription
+adapters are preserved, but feature work should target the Action pipeline.
+The local pipeline loop below is a developer tool for exercising that same
+Action entry point.
+
+Run `pnpm test` and `pnpm typecheck` for regression checks. Browser execution
+also needs validation against a real preview when credentials and a test PR
+are available. Action input wiring needs a workflow run for end-to-end validation.
 
 One thing to absorb before you touch anything user-facing: the codebase uses a
 fixed vocabulary, and the code, the comments, the PR output, and the README all
@@ -12,7 +16,7 @@ hold to it.
 | Term | Means |
 | --- | --- |
 | **Test Plan** | The set of journeys Greenlight infers a PR should be checked against. Not a test suite or a spec. |
-| **Plan Item** | One journey — an Intent, the route it starts from, the steps, and the Expected outcome. |
+| **Plan Item** | One journey; an Intent, the route it starts from, the steps, and the Expected outcome. |
 | **Intent** | What the item exercises, phrased as the user-visible purpose of the change rather than the code implementing it. |
 | **Expected** | The observable outcome that decides the item's Verdict. Not an assertion or acceptance criteria. |
 | **Judge** | Decides one item's Verdict by comparing its Expected against what is observable on the page. What it cannot observe, it declines to rule on. |
@@ -22,13 +26,13 @@ hold to it.
 
 ## Prerequisites
 
-- **Node 22** — what the Action's runner uses (`action.yml`).
-- **pnpm** (`corepack enable`) — the lockfile is pnpm's.
+- **Node 22**; what the Action's runner uses (`action.yml`).
+- **pnpm** (`corepack enable`); the lockfile is pnpm's.
 - **A local Chrome.** Stagehand's local mode finds one via `CHROME_PATH`, then
   `which google-chrome|chromium`. It never looks in Playwright's cache, so if
   you only have Playwright's browser, export `CHROME_PATH` yourself.
 - **A test repo on Vercel** with an open PR whose preview has already built.
-- **An LLM API key** for any supported provider — Anthropic, OpenAI, Google, or
+- **An LLM API key** for any supported provider; Anthropic, OpenAI, Google, or
   an OpenAI-compatible host (Fireworks, Together, OpenRouter). Nothing in the
   local loop assumes a particular one.
 
@@ -46,11 +50,11 @@ in your shell.
 
 | Variable | Needed | Notes |
 | --- | --- | --- |
-| `GREENLIGHT_LLM_API_KEY` | yes | The key, whichever provider you run. `GREENLIGHT_MODEL` picks the provider; this is its key. There is deliberately no `ANTHROPIC_API_KEY`-style alternative — a second source could only ever disagree with the selected provider, and the losing side would be a credential sent to the wrong host. Without a key `canExecute()` is false and the browser never opens. |
-| `GREENLIGHT_MODEL` | yes | `provider/model`, where provider is `anthropic`, `openai`, `google` (native SDKs) or `fireworks`, `together`, `openrouter` (OpenAI-compatible) and the model id is whatever that provider calls it. The prefix is required and there is no default — unset, or without a known prefix, the run says so and stays silent. `GREENLIGHT_EXECUTOR_MODEL` and `GREENLIGHT_VISUAL_JUDGE_MODEL` override the browser-driving and screenshot judges independently. |
+| `GREENLIGHT_LLM_API_KEY` | yes | The key, whichever provider you run. `GREENLIGHT_MODEL` picks the provider; this is its key. There is deliberately no `ANTHROPIC_API_KEY`-style alternative; a second source could only ever disagree with the selected provider, and the losing side would be a credential sent to the wrong host. Without a key `canExecute()` is false and the browser never opens. |
+| `GREENLIGHT_MODEL` | yes | `provider/model`, where provider is `anthropic`, `openai`, `google` (native SDKs) or `fireworks`, `together`, `openrouter` (OpenAI-compatible) and the model id is whatever that provider calls it. The prefix is required and there is no default; unset, or without a known prefix, the run says so and stays silent. `GREENLIGHT_EXECUTOR_MODEL` and `GREENLIGHT_VISUAL_JUDGE_MODEL` override the browser-driving and screenshot judges independently. |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | if previews are protected | The default on Vercel Pro/Team. Vercel → Settings → Deployment Protection → Protection Bypass for Automation. |
 
-Anything else `.env.example` lists is optional — leave it blank and the defaults
+Anything else `.env.example` lists is optional; leave it blank and the defaults
 hold.
 
 ### In your shell
@@ -63,16 +67,16 @@ export TEST_PR=12                    # an existing PR whose preview is BUILT
 
 The PAT needs, on the test repo: **Contents** `read`, **Pull requests**
 `read+write`, **Deployments** `read`, **Issues** `read`. Don't worry about
-Checks — see the 403 note below.
+Checks; see the 403 note below.
 
 Use an **already-open PR with a finished preview**. `waitForPreview` polls for
 up to five minutes; an existing preview returns ready on the first poll. Reruns
-are safe — both the plan comment and the results comment upsert in place.
+are safe; both the plan comment and the results comment upsert in place.
 
 ## Running a full pipeline locally
 
 `src/actionMain.ts` is verbatim what the Action runs (`action.yml:116`). Same
-entry point, same `processJob`, same recorder — only the environment differs.
+entry point, same `processJob`, same recorder; only the environment differs.
 
 ### 1. Build the event fixture
 
@@ -83,18 +87,18 @@ guards against, and a typo would be indistinguishable from it.
 curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
      -H "Accept: application/vnd.github+json" \
      "https://api.github.com/repos/$TEST_REPO/pulls/$TEST_PR" \
-| jq '{action: "synchronize", pull_request: {number: .number, head: {sha: .head.sha}}}' \
+| jq '{action: "synchronize", pull_request: {number: .number, head: {sha: .head.sha}, base: {sha: .base.sha}}}' \
 > /tmp/greenlight-event.json
 
 cat /tmp/greenlight-event.json
 ```
 
-Those three fields are the whole contract: `actionMain.ts` reads `action`,
-`pull_request.number` and `pull_request.head.sha` and nothing else
+These event fields are the contract: `actionMain.ts` reads `action`,
+`pull_request.number`, `pull_request.head.sha`, and `pull_request.base.sha`
 (`src/actionMain.ts:37-68`). `action` must be `opened` or `synchronize`;
 anything else exits early by design.
 
-The SHA has to be `.head.sha`, the branch head — **not** `GITHUB_SHA`, which on
+The SHA has to be `.head.sha`, the branch head; **not** `GITHUB_SHA`, which on
 `pull_request` is a synthesized merge commit that no preview was ever deployed
 for.
 
@@ -118,7 +122,7 @@ npx tsx src/actionMain.ts
 - `GREENLIGHT_DEBUG=1` adds phase-by-phase timing, which is how you localize a
   stall (`goto` vs `act` vs the Judge). Far too noisy for CI.
 - Add `GREENLIGHT_MOCK_PLAN=1` to skip the plan model and use the fixture in
-  `src/mockPlan.ts` — deterministic, and it spends nothing on plan generation.
+  `src/mockPlan.ts`; deterministic, and it spends nothing on plan generation.
   Use it whenever the thing under test is downstream of the plan.
 
 Command-line vars beat `.env` (dotenv doesn't override), so anything you set
@@ -130,7 +134,7 @@ here wins while your keys still come from the file.
 posted plan comment on owner/repo#12            ← or "updated"
 preview for owner/repo#12 ready at https://…    ← the head-SHA lookup worked
 browser session (model <provider>/<model>, visual judge <provider>/<model>)
-  item "…" @ /: pass — …
+  item "…" @ /: pass; …
 wrote session replay to ./greenlight-replay/replay.html (2 item(s), N events)
 posted results comment on owner/repo#12
 ```
@@ -140,7 +144,7 @@ posted results comment on owner/repo#12
 | `Missing required env var …` | A `config` getter that should be lazy is being evaluated at import (`src/config.ts:31`). Nothing may demand a credential this path doesn't use. |
 | `no Vercel preview for …` | Wrong head SHA, or that PR genuinely has no preview. |
 | `preview poll … forbidden` | PAT is missing Deployments `read`. |
-| Browser never opens | `canExecute()` is false — the LLM key isn't reaching the process. |
+| Browser never opens | `canExecute()` is false; the LLM key isn't reaching the process. |
 | No `wrote session replay` line | Real bug: rrweb didn't survive the run. |
 | `check run … forbidden` (403) | **Expected locally. Ignore.** |
 
@@ -166,12 +170,12 @@ The screenshot escalation only fires when the DOM-only Judge answers
 `cannot_tell`, so an ordinary run usually never reaches it. Two ways to confirm
 it's wired:
 
-- The session line prints `visual judge <provider>/<model>` — or
+- The session line prints `visual judge <provider>/<model>`; or
   `no visual judge` when no vision model resolved.
-- An escalated item logs `pass (from screenshot) — …`.
+- An escalated item logs `pass (from screenshot); …`.
 
 To force the path, run with `GREENLIGHT_MOCK_PLAN=1` and give a `MOCK_PLAN`
-item an `expected` that is only true in pixels — *"the Apply button is visibly
+item an `expected` that is only true in pixels; *"the Apply button is visibly
 greyed out"*, *"the success message is green"*. Anything carried by aria or text
 will be settled by the DOM Judge and never escalate.
 
@@ -179,7 +183,7 @@ Set `GREENLIGHT_VISUAL_JUDGE_MODEL=off` to check the fallback behaviour: those
 items should come back Inconclusive, never Fail.
 
 If you're on `together` or `openrouter` you'll see `no visual judge` and a line
-explaining why — those providers have no default vision model, and the
+explaining why; those providers have no default vision model, and the
 escalation deliberately won't reach for another vendor's, since one key setting
 feeds every provider and a cross-provider default would ship your key to a host
 you never chose. Name any vision model in `GREENLIGHT_VISUAL_JUDGE_MODEL` to
@@ -193,28 +197,29 @@ is wrong even if it works.
 - **The check is never red.** `conclusion()` returns only `success` or
   `neutral` (`src/results.ts:43`). A Fail is a finding, not a merge blocker,
   because a model that guesses wrong must never block someone's merge.
-- **Silence beats noise.** When something can't be established — no preview, no
-  browser, a broken run — Greenlight logs and posts nothing. Reporting must
+- **Silence beats noise.** When something can't be established; no preview, no
+  browser, a broken run; Greenlight logs and posts nothing. Reporting must
   never crash a job, and a broken run is not a Verdict.
 - **Inconclusive is a real answer.** Don't push the Judge toward a guess to
   make the output look decisive. A false Fail costs far more trust than a ❔.
 - **Use the vocabulary above** in code, comments, and anything a user reads.
   Consistent naming is why the PR output reads as one voice.
 - **Comments explain why, not what.** The existing ones document the constraint
-  or the failure that forced the shape of the code — match that. Don't narrate
+  or the failure that forced the shape of the code; match that. Don't narrate
   the syntax.
 
 ## Before you open a PR
 
 ```bash
+pnpm test
 pnpm typecheck
 ```
 
 Then run the pipeline locally at least once against a live PR. A green
 typecheck says nothing about whether an agent still completes a journey.
 
-If your change touches `action.yml` — inputs, the `env:` block, the browser
-resolution step — a local run cannot cover it. That layer only exists on a
+If your change touches `action.yml`; inputs, the `env:` block, the browser
+resolution step; a local run cannot cover it. That layer only exists on a
 runner: Actions sets an unprovided input to the empty string rather than
 omitting it, so a `??` fallback that works locally silently yields `""` there.
 Test those against a real workflow run.

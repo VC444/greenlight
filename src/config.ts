@@ -1,6 +1,10 @@
 import "dotenv/config";
+import os from "node:os";
+import path from "node:path";
 
 export const config = {
+  // Stagehand owns persistent action caching. Empty disables the cache.
+  stagehandCacheDir: process.env.GREENLIGHT_CACHE_DIR ?? path.join(os.homedir(), ".greenlight", "cache", "stagehand"),
   // Optional: secret from Vercel "Deployment Protection → Protection Bypass for
   // Automation". Empty when previews are public. Used only to reach guarded
   // previews, never sent to GitHub.

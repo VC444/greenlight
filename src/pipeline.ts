@@ -12,6 +12,8 @@ import { runPlan } from "./execute.js";
 import { reportResults, reportPaused } from "./results.js";
 import { config } from "./config.js";
 import { MOCK_PLAN } from "./mockPlan.js";
+import { createNativeSetup } from "./nativeSetup.js";
+import { readActionContext } from "./actionContext.js";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,7 +31,7 @@ type Gate =
  *
  * The default is checked, so this normally returns on its first read and costs
  * one API call. It only ever waits because a human deliberately unchecked the
- * box, which is them asking for time to correct the plan — the run holds the
+ * box, which is them asking for time to correct the plan; the run holds the
  * runner open for that, since a workflow run is the only thing still listening.
  */
 async function awaitRunBox(
@@ -53,7 +55,7 @@ async function awaitRunBox(
     if (!announced) {
       announced = true;
       console.log(
-        `run box unchecked on ${label} — holding for up to ` +
+        `run box unchecked on ${label}; holding for up to ` +
           `${Math.round(config.pauseTimeoutMs / 60_000)} min while the plan is edited`,
       );
       await reportPaused(octokit, job);
@@ -69,16 +71,16 @@ function logPreviewProblem(preview: PreviewResult, label: string): void {
   switch (preview.status) {
     case "failed":
       console.warn(
-        `preview unavailable for ${label}: ${preview.reason} — staying silent`,
+        `preview unavailable for ${label}: ${preview.reason}; staying silent`,
       );
       break;
     case "timeout":
       console.warn(
-        `preview for ${label} did not go ready in time — staying silent`,
+        `preview for ${label} did not go ready in time; staying silent`,
       );
       break;
     case "none":
-      console.log(`no Vercel preview for ${label} — nothing to test against`);
+      console.log(`no Vercel preview for ${label}; nothing to test against`);
       break;
   }
 }
@@ -93,12 +95,24 @@ function logPreviewProblem(preview: PreviewResult, label: string): void {
  * installation token instead. Keep it that way: nothing below this line should
  * learn how it was authenticated.
  */
-export async function processJob(octokit: Octokit, job: PullRequestJob): Promise<void> {
+const pipelineDependencies = {
+  readActionContext, gatherPrContext, generateTestPlan, upsertPlanComment,
+  waitForPreview, readPlanComment, runPlan, reportResults,
+};
+
+export async function processJob(
+  octokit: Octokit,
+  job: PullRequestJob,
+  dependencies: typeof pipelineDependencies = pipelineDependencies,
+): Promise<void> {
+  const { readActionContext, gatherPrContext, generateTestPlan, upsertPlanComment,
+    waitForPreview, readPlanComment, runPlan, reportResults } = dependencies;
   const label = `${job.owner}/${job.repo}#${job.prNumber}`;
+  const runContext = await readActionContext(octokit, job);
 
   let plan: TestPlan | null;
   if (config.useMockPlan) {
-    // Deterministic fixture instead of the model — validates the pipeline
+    // Deterministic fixture instead of the model; validates the pipeline
     // (comment → preview → execution) without spending LLM credits.
     console.log(`mock-plan mode: using fixture plan for ${label} (no LLM call)`);
     plan = MOCK_PLAN;
@@ -110,11 +124,11 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
         ` issue ${context.linkedIssue ? `#${context.linkedIssue.number}` : "none"}` +
         `${context.truncated ? ", truncated" : ""}`,
     );
-    plan = await generateTestPlan(context);
+    plan = await generateTestPlan(context, runContext);
   }
 
   if (!plan) {
-    console.warn(`no test plan for ${label} — staying silent`);
+    console.warn(`no test plan for ${label}; staying silent`);
     return;
   }
 
@@ -133,12 +147,12 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
   while (true) {
     const gate = await awaitRunBox(octokit, job, label);
     if (gate.status === "superseded") {
-      console.log(`plan comment for ${label} is gone or superseded — stopping`);
+      console.log(`plan comment for ${label} is gone or superseded; stopping`);
       return;
     }
     if (gate.status === "paused") {
       console.log(
-        `run box on ${label} was never checked back on — stopping. ` +
+        `run box on ${label} was never checked back on; stopping. ` +
           `Checking it later won't reach this run; push again to start over.`,
       );
       return;
@@ -152,10 +166,10 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
 
     // Last look before spending a browser on it. The preview can take minutes
     // to build, which is plenty of time for someone to uncheck the box or fix a
-    // step — and this is the final moment either can still count.
+    // step; and this is the final moment either can still count.
     const current = await readPlanComment(octokit, job);
     if (!current || current.headSha !== job.headSha) {
-      console.log(`plan comment for ${label} is gone or superseded — stopping`);
+      console.log(`plan comment for ${label} is gone or superseded; stopping`);
       return;
     }
     if (!current.run) {
@@ -163,15 +177,22 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
       continue;
     }
     if (current.plan.items.length === 0) {
-      console.log(`every item on ${label} was unchecked — nothing to run`);
+      console.log(`every item on ${label} was unchecked; nothing to run`);
       return;
     }
     if (current.skipped > 0) {
-      console.log(`${current.skipped} item(s) unchecked on ${label} — skipping them`);
+      console.log(`${current.skipped} item(s) unchecked on ${label}; skipping them`);
     }
 
-    console.log(`preview ready for ${label}: ${preview.url} — executing plan`);
-    const result = await runPlan(preview.url, current.plan);
+    console.log(`preview ready for ${label}: ${preview.url}; executing plan`);
+    const setup = runContext.setup ? createNativeSetup(runContext.setup) : undefined;
+    let result;
+    try {
+      result = await runPlan(preview.url, current.plan, console.log,
+        setup, runContext.conditionTimeoutMs);
+    } finally {
+      await setup?.dispose();
+    }
     if (result) {
       const pass = result.items.filter((i) => i.verdict === "pass").length;
       const fail = result.items.filter((i) => i.verdict === "fail").length;
@@ -179,7 +200,7 @@ export async function processJob(octokit: Octokit, job: PullRequestJob): Promise
       console.log(
         `executed ${result.items.length} item(s) for ${label}: ` +
           `${pass} pass, ${fail} fail, ${uncertain} uncertain` +
-          ` — replay ${result.replayUrl ?? "n/a"}`,
+          `; replay ${result.replayUrl ?? "n/a"}`,
       );
       // Surface the verdicts on the PR: check run + results comment.
       await reportResults(octokit, job, { ...current.plan, pmReview: plan.pmReview }, result);

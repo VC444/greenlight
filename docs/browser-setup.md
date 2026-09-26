@@ -1,144 +1,157 @@
 # Browser setup
 
-The local skill can apply a personal setup workflow before each check, such as
-dismissing a welcome dialog or selecting a workspace. The GitHub Action does
-not load or apply this workflow.
+Greenlight uses `.greenlight/setup.ts`, a standalone TypeScript module owned
+by the app's repository. It exports an async function containing native
+Stagehand calls, direct Playwright operations, and assertions written in code.
 
-## Create and review setup
+## Create and verify
 
-Run `/greenlight init` in Claude Code, or `$greenlight init` in Codex.
-Greenlight asks you to describe the setup steps in order and how to tell the
-app is ready. It asks for any missing labels, conditions, or deadlines, then
-saves your answers as `~/.greenlight/setup.yaml`. No repository URL is needed.
-Initialization does not inspect source code or infer setup steps.
+Run `greenlight init` from the app's Git repository. The CLI finds the repository
+root, even from a subdirectory, and creates a starter. Existing scripts are
+preserved. The starter deliberately throws until preparation and readiness
+checks have been filled in; scaffolding does not establish that the app is ready.
+No model subscription or API key is needed to create the file.
 
-Review the saved recipe before running checks; it has not been
-browser-verified. Credentials, MFA, and external sign-in requirements need
-manual preparation. Running `init` again displays your existing setup
-without overwriting edits. You can also write the file yourself using the
-schema below.
+For agent-assisted authoring, invoke `$greenlight init` in Codex or
+`/greenlight init` in Claude Code from the app's repository. Describe what setup
+should do and how to recognize success. The agent asks for missing details,
+writes native code, and saves it for review. It does not regenerate the script
+during subsequent PR runs. Developers can also write the file directly.
 
-The local skill reads this file automatically, regardless of the working
-directory. One setup applies to every repository you check, so update it when
-switching apps. The file stays outside your repository and is not shared with
-teammates.
+Test the reviewed working-tree script with:
 
-Greenlight checks exact visibility conditions such as `the link labeled
-"See Examples" is visible` and `the text "Ready" is visible` using Playwright's
-role and text locators on the same browser page used by Stagehand. These checks
-use Playwright's accessible-name matching and visibility rules without model
-inference. Greenlight retries unsatisfied conditions until the setup deadline.
-Conditions outside this narrow grammar use Stagehand's AI-powered extraction.
-All actions use Stagehand, preserving the original instruction, including the
-difference between clicking a checkbox and ensuring it is checked.
-
-Failed checks include bounded execution diagnostics showing the strategy used,
-match and visibility counts for deterministic conditions, and action failures.
-Page HTML, credentials, cookies, request headers, and form values are not included
-in those diagnostics.
-
-## Schema
-
-Use version 1. Each step has a unique ID, a prerequisite, ordered actions, and
-a postcondition. Conditions describe observable UI states; actions describe
-individual unconditional UI interactions.
-
-```yaml
-version: 1
-steps:
-  - id: dismiss-welcome
-    wait_for: >
-      The welcome dialog containing
-      "I acknowledge the above statements." is visible.
-    timeout_ms: 10000
-    actions:
-      - Ensure "I acknowledge the above statements." is checked.
-      - Click "Continue to Console".
-    verify: >
-      The welcome dialog is absent and
-      the console navigation is visible and usable.
-ready:
-  condition: >
-    The console navigation is visible and usable,
-    with no dialog blocking interaction.
-  timeout_ms: 10000
+```bash
+greenlight setup-check https://preview.example
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `version` | Must be `1`. |
-| `steps` | Ordered setup steps; may be empty when only readiness needs checking. |
-| `steps[].id` | Unique identifier using letters, digits, underscores, or hyphens. |
-| `steps[].wait_for` | Visible prerequisite for executing the actions. |
-| `steps[].timeout_ms` | Deadline applied separately to the prerequisite and postcondition. |
-| `steps[].actions` | Nonempty list of individual UI actions executed in order. |
-| `steps[].verify` | Visible postcondition required after all actions. |
-| `ready.condition` | Final observable condition required before testing begins. |
-| `ready.timeout_ms` | Deadline for the final readiness check. |
+This command executes local repository code against the supplied preview. It
+requires Chrome plus `GREENLIGHT_MODEL` and `GREENLIGHT_LLM_API_KEY` for
+Stagehand inference. Environment configuration can be supplied through `.env`.
+It runs only setup, without generating a plan, making a model verdict, or
+posting to GitHub. Errors exit unsuccessfully; success means the script returned
+without throwing. The assertions in your script determine what readiness means.
+A replay is written to `greenlight-replay` by default. Review it before committing.
 
-Choose conditions and deadlines appropriate for your app. Express waits in conditions and
-make checkbox actions idempotent, such as ensuring a checkbox is selected.
+## Hook contract
 
-Deadlines must be integers from 1 to 300000 milliseconds. Each deadline
-includes model observation time. UI actions use the browser driver's action
-timeout.
+```ts
+import type { Stagehand } from "@browserbasehq/stagehand";
+import type { Page } from "playwright-core";
+import type { z as Zod } from "zod";
 
-## Execution and failures
+type SetupContext = {
+  stagehand: Stagehand;
+  page: Page;
+  z: typeof Zod;
+  previewUrl: string;
+  signal: AbortSignal;
+};
 
-Every configured step runs in order. For each step, Greenlight waits for
-`wait_for`, executes each action in order, and waits for `verify`. Unsatisfied
-or uncertain conditions are retried until their deadline. After every step
-has completed, Greenlight evaluates `ready`.
-Natural-language conditions depend on model interpretation of visible UI.
+export default async function setup({ stagehand, page, z, signal }: SetupContext) {
+  signal.throwIfAborted();
+  const { workspace } = await stagehand.extract(
+    "Extract the selected workspace name.",
+    z.object({ workspace: z.string().nullable() }),
+    { page },
+  );
 
-A failed action, observation error, or expired deadline prevents that check's
-test steps from starting. The result is inconclusive and labeled
-`Setup blocked`. Progress logs identify steps,
-condition verification, and failures. Setup actions appear in the session
-replay when recording is enabled.
+  if (workspace !== "Demo") {
+    const opened = await stagehand.act("Click the workspace selector.", { page });
+    if (!opened.success) throw new Error(opened.message);
+    signal.throwIfAborted();
+    const selected = await stagehand.act('Click "Demo".', { page });
+    if (!selected.success) throw new Error(selected.message);
+  }
 
-Checks share one fresh browser session per run, so saved app state can carry
-between checks. When testing the welcome modal itself, temporarily remove or
-adjust the recipe so setup does not dismiss the UI under test.
+  signal.throwIfAborted();
+  const ready = await stagehand.extract(
+    "Extract the selected workspace name.",
+    z.object({ workspace: z.string().nullable() }),
+    { page },
+  );
+  if (ready.workspace !== "Demo") throw new Error("Expected the Demo workspace.");
+}
+```
 
-## Validation
+Use instructions and expected values that match your app. Greenlight supplies
+the existing Stagehand instance, live Playwright page, Zod, preview URL, and
+abort signal. The page is already at the preview entry point with replay
+recording attached. Always pass `{ page }` to Stagehand calls so they operate
+on the recorded page. Do not start or close your own browser or Stagehand session.
 
-The file must be UTF-8 and at most 16000 bytes. It accepts up to 12 steps with
-1 to 12 actions each. Unknown fields, duplicate keys or step IDs, unsupported
-versions, blank conditions, and missing required fields are rejected before
-browser execution. YAML aliases and multiple documents are not supported.
+The hook runs before each check in the shared session. Handle already-prepared
+state. After common setup, Greenlight navigates to that check's route and applies
+PR-specific preparation before exercising the changed behavior. All normal
+setup interactions on the supplied page appear in the replay.
 
-A missing setup file preserves the normal flow. An empty, invalid, unreadable,
-or oversized file stops the run.
+Use native `act()`, `extract()`, `observe()`, or direct Playwright methods.
+Check `act()` results for success. Throw when readiness is not established.
+If a page needs time to settle, write explicit waits or polling in the script;
+Greenlight adds no YAML translation, condition interpretation, or hidden retry
+loop around your code. Extract facts and compare expected values in code.
 
-Existing recipes containing `skip_if` are rejected as invalid. Remove that
-field before running checks; every remaining step is required.
+## Loading and trust
 
-## PR-specific starting states
+For ordinary PR runs, Greenlight downloads `.greenlight/setup.ts` through the
+GitHub Contents API using the PR event's exact `base.sha`. It uses the base
+repository and never falls back to PR-head code or a workspace file. Logs show
+the base revision. The existing `contents: read` permission is sufficient;
+a caller checkout is not needed for setup.
 
-Local runs identify prerequisites while planning, using the PR description,
-linked issue, common setup, and any notes supplied for that run. When a check
-needs missing data or state, Greenlight asks targeted questions in chat before
-opening the browser. Simple checks proceed without questions.
+A missing base script skips common setup. An empty, oversized, unreadable, or
+invalid script does not run checks as if setup succeeded. Missing base revision
+or API errors other than a missing file stop the pipeline. Scripts are limited
+to 16000 UTF-8 bytes and must default-export a function. Syntax and export errors
+are reported as Setup blocked when execution begins.
 
-For example: "Which failed import should I use to check retry?" Supply an
-existing example and where to find it, or instructions for creating it through
-ordinary UI actions. You can also supply notes upfront with
-`--context-file /tmp/greenlight-context.txt`, or describe them when invoking the
-skill. The agent passes chat answers through a temporary context file. Notes
-are sent to the configured model backend, are limited to 16000 UTF-8 bytes,
-and apply only to the current run. Keep credentials out of them.
+Only the single script is fetched. Keep it self-contained. Runtime imports may
+use Node built-ins and the Action's installed dependencies. Repository-relative
+helpers and the app's `node_modules` are not loaded. Type imports in the example
+are erased at runtime; for editor typechecking, install the corresponding
+dependencies in the app's development environment.
 
-Greenlight prepares and verifies each check's starting state after common
-setup, before exercising the changed behavior. Readiness observation has a
-60-second deadline; preparation actions use the browser action timeout.
-Preparation appears in the replay. A missing or unverified prerequisite is
-reported as inconclusive with `Prerequisite blocked`.
+This is trusted executable code with access to the runner environment, not a
+sandbox. Keep secrets in environment variables, not in the script. Review setup
+changes like other executable CI configuration. PR edits to setup are not used
+until merged. Use the explicitly invoked local `setup-check` command to verify
+a proposed script before merging; ordinary PR runs have no override to execute
+PR-head setup.
 
-If you cannot supply a prerequisite, say so or ask to skip the affected check.
-It remains inconclusive in the report while other checks can run. File uploads,
-backend seeding, and account configuration require manual preparation in this
-version. Provide the resulting record's visible location when it is ready.
-Each reply triggers fresh planning against the current PR, so a changed PR
-can lead to new questions. This conversation is supported by the local skill;
-the GitHub Action does not ask prerequisite questions.
+## Failure and timeout behavior
+
+A thrown error leaves the affected check Inconclusive with `Setup blocked`.
+A pending native setup invocation has a deadline of 60 seconds, including module
+loading. Set `setup-timeout-seconds` from 1 to 300 to change it. On expiry,
+Greenlight aborts the supplied signal, stops remaining checks, saves available
+replay evidence, and closes the browser. Remaining checks become Inconclusive.
+Check the signal between operations and pass it to cancellable operations.
+
+JavaScript running synchronously cannot be interrupted by this asynchronous
+deadline. Background work that ignores the signal is not forcibly terminated
+by a promise timeout. Keep a job-level `timeout-minutes` as the final process
+limit, and do not start background work that outlives the hook.
+
+## PR-specific prerequisites
+
+Shared preparation belongs in the committed script. Record names, reproduction
+instructions, and other per-PR details belong in the PR description or
+`run-context`. The planner reads the base script as context to avoid duplicating
+its preparation; it never rewrites or regenerates the script.
+
+Per-check preparation remains visible in the plan comment as Prepare, Ready,
+and Equals lines. Missing prerequisites produce an explicit Blocked reason.
+CI does not ask follow-up questions. Supply missing data and rerun, or correct
+a paused plan before resuming it. External sign-in, MFA, backend seeding, and
+account configuration must already be supported by your setup and environment.
+Vercel deployment bypass does not sign into the application.
+
+## Migration from YAML
+
+The Action no longer loads `.greenlight/setup.yaml`. Rewrite its actions as
+native calls and its conditions as extraction plus code assertions in
+`.greenlight/setup.ts`. Review and run `setup-check`, then merge the new script.
+YAML files are preserved; there is no automatic conversion or deletion.
+
+The paused local PR runner still accepts its personal `~/.greenlight/setup.yaml`
+recipes. `greenlight init` now targets the repository's native setup; it does
+not update the personal YAML file.

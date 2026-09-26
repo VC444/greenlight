@@ -1,21 +1,29 @@
 ---
 name: greenlight
-description: Collect user-provided personal browser setup steps, or run Greenlight checks for a pull request and preview URL using the current agent subscription.
+description: Create a repository Stagehand setup script, verify it against a preview with setup-check, or run preserved local PR checks.
 ---
 
 # Greenlight
 
-## Initialize personal setup
+## Initialize repository setup
 
-For `/greenlight init` (or `$greenlight init` in Codex), run `bash scripts/run-greenlight.sh init` from this skill directory. No repository URL is needed. Initialization uses only the user's instructions; do not inspect repositories or previews to infer steps.
+For `/greenlight init` or `$greenlight init`, work from the app's repository. Invoke this skill's `scripts/run-greenlight.sh` by absolute path with `init --prompt`, keeping the working directory in the app's repository. The command finds the repository root and preserves an existing `.greenlight/setup.ts`.
 
-If the runner displays an existing setup, show it and stop, preserving the file. If it reports an error, return the error and stop. Otherwise send only the runner's question verbatim in chat and wait for the user's steps before continuing.
+If an existing script is displayed, show it and stop unless the user requested edits. If the command fails, report the error. Otherwise ask its question and use any setup instructions already supplied. Ask only for missing action labels, required data, or observable readiness facts. Source code alone does not establish what preparation the user wants.
 
-After the user answers, read `docs/browser-setup.md` in the repository for the YAML schema. Translate their description into ordered steps, using details already supplied. Ask only for details needed to complete the recipe, one short, plain-language question at a time. For example, ask "What will I see when the app is ready?" if their description leaves that unclear. Keep schema terms and technical checklists out of the conversation. Every configured step runs in order. If the user needs no actions, use an empty steps list and their ready condition. Keep credentials out of the recipe; manual authentication must be completed before checks. Never invent actions, consent choices, conditions, or deadlines.
+Write a standalone TypeScript module that default-exports `async function setup({ stagehand, page, z, previewUrl, signal })`. It receives the existing Stagehand instance, the live Playwright page already at the preview entry point, Zod, the preview URL, and an abort signal. Use native `stagehand.act()` and `stagehand.extract()` calls or direct page methods. Check `act()` results for success; compare extracted facts with expected values in code and throw on failed readiness. Check the abort signal between operations. The hook runs before each check in a shared browser session, so handle already-prepared state. Keep credentials in environment variables. Use only supplied preparation and readiness requirements. Keep the script self-contained; runtime imports may use Node built-ins and the Action's dependencies, but repository-relative helpers are not fetched.
 
-Once the answers are complete, write the recipe as JSON to a temporary UTF-8 file. JSON is valid YAML, so the normal check runner can read the saved file. Run `bash scripts/run-greenlight.sh init --setup-file <absolute temporary file path>`. The runner validates and saves it to `~/.greenlight/setup.yaml` without overwriting an existing setup. Remove the temporary file afterward. Display the saved recipe for review and explain that it contains the user's supplied steps and has not been browser-verified.
+Write the completed script to a temporary UTF-8 `.ts` file and run the same absolute runner path with `init --setup-file <temporary file>`, still from the app's repository. Remove the temporary file afterward. The writer preserves existing scripts and never executes supplied code. Show the saved script and explain that it has not yet been browser-verified.
 
-## Run checks
+If the user supplied a preview URL and requested testing, follow the Verify repository setup section below. Otherwise explain how to invoke `setup-check` next. After verification, tell the user to commit and review the script. Ordinary PR runs load it from the pinned base commit; setup changes in the PR are not executed by those runs.
+
+## Verify repository setup
+
+For `$greenlight setup-check <preview-url>` or `/greenlight setup-check <preview-url>`, work from the app's repository. Require the preview URL and an existing `.greenlight/setup.ts`. Invoke this skill's `scripts/run-greenlight.sh` by absolute path with `setup-check <preview-url>`, keeping the working directory in the app's repository. The runner obtains the runtime through npx and selects the current agent subscription. Use this entry point even when a global `greenlight` command is unavailable.
+
+This invocation authorizes executing the working-tree setup script against the supplied preview. It makes no GitHub requests. Relay progress until the command completes. Report a failed setup without claiming verification; ask for missing app details or authentication only when needed to proceed. On success, point to the replay in `greenlight-replay` for review. Keep the script unchanged unless the user requests a fix. Ordinary PR runs use the committed base version, so this command is how the developer tests proposed setup edits before merging.
+
+## Preserved local checks
 
 Require a GitHub pull request URL followed by its preview URL. Accept `--context-file <absolute path>` for optional run-specific notes, `--no-record` to skip the replay or `--record-dir <absolute path>` to choose its folder. The default is a unique folder on the user's Desktop.
 

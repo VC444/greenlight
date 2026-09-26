@@ -1,3 +1,4 @@
+import { ExtractionConditionSchema } from "./setup.js";
 import { renderPmReview } from "./results.js";
 import type { Octokit } from "@octokit/core";
 import type { PullRequestJob } from "./job.js";
@@ -16,7 +17,7 @@ const MARKER_RE = /^<!-- greenlight:plan sha:(\S+) confidence:(high|low) -->\n?/
 
 // Tags the one checkbox that gates execution so parsing can never confuse it
 // with the per-item boxes. It sits at the end of the line because GitHub
-// rewrites task-list checkboxes by source position when someone clicks one —
+// rewrites task-list checkboxes by source position when someone clicks one;
 // keep the "- [ ] " prefix pristine. Renders as nothing.
 const RUN_TOKEN = "<!-- greenlight:run -->";
 const RUN_RE = /^- \[([ xX])\].*<!-- greenlight:run -->\s*$/m;
@@ -95,8 +96,12 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
     checked: boolean;
     intent: string;
     route: string;
-    steps: string[];
+    steps: TestPlan["items"][number]["steps"];
     expected: string;
+    startingState?: NonNullable<TestPlan["items"][number]["startingState"]>;
+    blockedReason?: string;
+    readyExtract?: string;
+    readyEquals?: string;
   }
   let draft: Draft | null = null;
 
@@ -105,18 +110,31 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
     if (!draft.checked) {
       skipped++;
     } else if (draft.expected) {
+      if (draft.startingState) {
+        try {
+          draft.startingState.condition = ExtractionConditionSchema.parse({
+            extract: draft.readyExtract,
+            equals: draft.readyEquals === undefined ? undefined : JSON.parse(draft.readyEquals),
+          });
+        } catch {
+          draft.blockedReason = "Preparation requires valid Ready and Equals lines. Equals must be a JSON string, number, or boolean.";
+          draft.startingState = undefined;
+        }
+      }
       items.push({
         intent: draft.intent,
         route: draft.route,
         steps: draft.steps,
         expected: draft.expected,
+        ...(draft.startingState ? { startingState: draft.startingState } : {}),
+        ...(draft.blockedReason ? { blockedReason: draft.blockedReason } : {}),
       });
     } else {
       // A human deleted or mangled the Expect line, so there is no longer
       // anything to judge this item against. Running it could only produce a
       // verdict about a question nobody asked.
       console.warn(
-        `plan item "${draft.intent}" has no "Expect:" line after editing — skipping it`,
+        `plan item "${draft.intent}" has no "Expect:" line after editing; skipping it`,
       );
     }
     draft = null;
@@ -147,9 +165,27 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
     }
 
     if (draft) {
+      const prepare = line.match(/^ {2,}\*\*Prepare:\*\*\s*(.+?)\s*$/);
+      const ready = line.match(/^ {2,}\*\*Ready:\*\*\s*(.+?)\s*$/);
+      const blocked = line.match(/^ {2,}\*\*Blocked:\*\*\s*(.+?)\s*$/);
+      const equals = line.match(/^ {2,}\*\*Equals:\*\*\s*(.+?)\s*$/);
+      if (prepare?.[1] || ready?.[1] || equals?.[1]) {
+        draft.startingState ??= { steps: [], condition: "" };
+        if (prepare?.[1]) draft.startingState.steps.push(prepare[1]);
+        if (ready?.[1]) draft.readyExtract = ready[1];
+        if (equals?.[1]) draft.readyEquals = equals[1];
+        continue;
+      }
+      if (blocked?.[1]) {
+        draft.blockedReason = blocked[1];
+        continue;
+      }
       const step = line.match(STEP_RE);
       if (step?.[1]) {
-        draft.steps.push(step[1]);
+        const typed = step[1].match(/^\[(action|assert)\] (.+)$/);
+        draft.steps.push(typed
+          ? { kind: typed[1] as "action" | "assert", instruction: typed[2]! }
+          : step[1]);
         continue;
       }
       const expected = line.match(EXPECT_RE);
@@ -189,7 +225,7 @@ export async function readPlanComment(
   return parsed ? { id: existing.id, ...parsed } : null;
 }
 
-function renderPlan(plan: TestPlan, headSha: string): string {
+export function renderPlan(plan: TestPlan, headSha: string): string {
   const lines: string[] = ["### 🎄 Greenlight: what I'll verify", "", plan.summary];
   if (plan.confidence === "low") {
     lines.push("_(low confidence, inferred from the diff alone)_");
@@ -197,8 +233,15 @@ function renderPlan(plan: TestPlan, headSha: string): string {
   lines.push("");
   for (const item of plan.items) {
     lines.push(`- [x] **${item.intent}** (\`${item.route}\`)`);
+    if (item.blockedReason) lines.push(`  **Blocked:** ${singleLine(item.blockedReason)}`);
+    if (item.startingState) {
+      for (const step of item.startingState.steps) lines.push(`  **Prepare:** ${singleLine(step)}`);
+      const condition = item.startingState.condition;
+      lines.push(`  **Ready:** ${singleLine(typeof condition === "string" ? condition : condition.extract)}`);
+      if (typeof condition !== "string") lines.push(`  **Equals:** ${JSON.stringify(condition.equals)}`);
+    }
     for (const [i, step] of item.steps.entries()) {
-      lines.push(`  ${i + 1}. ${step}`);
+      lines.push(`  ${i + 1}. ${typeof step === "string" ? step : `[${step.kind}] ${step.instruction}`}`);
     }
     lines.push("");
     lines.push(`  **Expect:** ${item.expected}`);
@@ -212,6 +255,10 @@ function renderPlan(plan: TestPlan, headSha: string): string {
     `<sub>Plan for \`${headSha.slice(0, 7)}\` · uncheck the box above to pause me while you edit this plan, check it again to run · uncheck any item to skip it · pushing a commit replaces this plan</sub>`,
   );
   return lines.join("\n");
+}
+
+function singleLine(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
 }
 
 export function renderNothingToTest(plan: TestPlan, headSha: string): string {

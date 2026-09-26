@@ -10,5 +10,6 @@ export interface PullRequestJob {
   repo: string;
   prNumber: number;
   headSha: string;
+  baseSha?: string;
   action: "opened" | "synchronize";
 }

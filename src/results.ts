@@ -68,14 +68,11 @@ function renderItems(items: ItemEvidence[]): string {
       if (item.error && item.diagnostics?.length) {
         lines.push("  <details><summary>Execution diagnostics</summary>", "");
         for (const diagnostic of item.diagnostics.slice(-8)) {
-          const counts = diagnostic.matchCount === undefined
-            ? ""
-            : `; matches ${diagnostic.matchCount}, visible ${diagnostic.visibleCount ?? 0}`;
           const attempts = diagnostic.attempts && diagnostic.attempts > 1
             ? `; observed ${diagnostic.attempts} times`
             : "";
           const reason = diagnostic.reason ? `; ${diagnostic.reason}` : "";
-          lines.push(`  - ${diagnostic.phase} via ${diagnostic.strategy}: ${diagnostic.outcome}${counts}${attempts}${reason}`);
+          lines.push(`  - ${diagnostic.phase} via ${diagnostic.strategy}: ${diagnostic.outcome}${attempts}${reason}`);
         }
         lines.push("", "  </details>");
       }
@@ -242,6 +239,9 @@ export function renderResultsComment(
   ];
   const replay = replayLine(result).trim();
   if (replay) lines.push("", replay);
+  if (surface === "local" && result.diagnosticsPath) {
+    lines.push("", `Local debugging details: [diagnostics.json](<${result.diagnosticsPath.replace(/>/g, "%3E")}>)`);
+  }
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
   const safety =
     surface === "local"

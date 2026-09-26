@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { ExtractionConditionSchema } from "./setup.js";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import type { PrContext } from "./context.js";
@@ -8,6 +9,20 @@ import {
   SubscriptionRequestError,
   subscriptionBackend,
 } from "./subscriptionCli.js";
+
+export const TestStepSchema = z.object({
+  kind: z.enum(["action", "assert"]),
+  instruction: z.string().trim().min(1).describe(
+    "For action: exactly one UI interaction, such as fill OR click. " +
+    "For assert: a concrete observable condition to verify at this point in the journey.",
+  ),
+});
+
+export type TestStep = string | z.infer<typeof TestStepSchema>;
+
+export function stepInstruction(step: TestStep): string {
+  return typeof step === "string" ? step : step.instruction;
+}
 
 const TestPlanItemSchema = z.object({
   intent: z
@@ -20,9 +35,9 @@ const TestPlanItemSchema = z.object({
         "The runner navigates here once before the first step; never add steps that re-open it.",
     ),
   steps: z
-    .array(z.string())
+    .array(TestStepSchema)
     .describe(
-      "Concrete browser actions for ONE continuous journey, run in order in the " +
+      "Atomic browser actions and intermediate assertions for ONE continuous journey, run in order in the " +
         "same tab with no page reload between them (state carries over, exactly " +
         "like a real user). Move between pages by clicking UI elements, not by " +
         "starting over. e.g. \"Type 'test@example.com' into the email field\".",
@@ -78,15 +93,25 @@ export const LocalTestPlanSchema = TestPlanSchema.extend({
   })),
 });
 
+export const ActionStartingStateSchema = StartingStateSchema.extend({ condition: ExtractionConditionSchema });
+export const ActionTestPlanSchema = LocalTestPlanSchema.omit({ questions: true }).extend({
+  items: z.array(TestPlanItemSchema.extend({
+    startingState: ActionStartingStateSchema.nullable(),
+    blockedReason: z.string().trim().min(1).nullable(),
+  })),
+});
+
 export interface RunContext {
+  mode?: "local" | "action";
   setup: string | null;
   notes: string;
 }
 
 export type TestPlan = Omit<z.infer<typeof TestPlanSchema>, "pmReview" | "items"> & {
   questions?: string[];
-  items: (z.infer<typeof TestPlanItemSchema> & {
-    startingState?: z.infer<typeof StartingStateSchema> | null;
+  items: (Omit<z.infer<typeof TestPlanItemSchema>, "steps"> & {
+    steps: TestStep[];
+    startingState?: z.infer<typeof StartingStateSchema> | z.infer<typeof ActionStartingStateSchema> | null;
     blockedReason?: string | null;
   })[];
   pmReview?: z.infer<typeof PmReviewSchema> | null;
@@ -100,11 +125,12 @@ Rules:
 - Ground every item in evidence from the PR. Test what the change is *for*, not everything the app does. Never invent features that aren't in the diff or description.
 - Only propose tests a browser can execute against a deployed preview: navigate, click, type, submit, and observe rendered output. No unit tests, no direct API assertions, no access to the codebase at runtime.
 - Routes come from the Next.js file layout (app/ or pages/ directories) visible in the changed file paths and contents. A route is only where a journey *starts*.
-- One journey = one item. An item is a full user flow: its steps run in order in a single tab, sharing state, exactly as a real user clicking through. NEVER split a continuous flow across items — every item begins with a fresh page load, so a later item loses everything the earlier steps built (a cart emptied, a form reset, a menu re-closed). If two things are steps of the same flow, they belong in one item's steps. Use separate items only for genuinely independent behaviors a user would reach on their own (e.g. two unrelated features the PR touches).
+- One journey = one item. An item is a full user flow: its steps run in order in a single tab, sharing state, exactly as a real user clicking through. NEVER split a continuous flow across items; every item begins with a fresh page load, so a later item loses everything the earlier steps built (a cart emptied, a form reset, a menu re-closed). If two things are steps of the same flow, they belong in one item's steps. Use separate items only for genuinely independent behaviors a user would reach on their own (e.g. two unrelated features the PR touches).
 - Within a journey, move between pages by interacting with the UI ("Click the 'Cart' link"), never by adding a new item per page. Each item yields a single pass/fail, so let \`expected\` describe the journey's final observable outcome.
+- Each step has kind "action" or "assert" and an instruction. An action must contain exactly ONE interaction: split filling a field and clicking Apply into separate steps. Never send observe, check, or verify instructions as actions. Use assert steps with explicit expected text or values to verify intermediate states before later actions erase them. For example: fill PIXAR20, click Apply, assert discounted prices, fill INVALID, click Apply. Put only the final state in expected; earlier states belong in assert steps.
 - Steps must be concrete and self-contained: "Type 'test@example.com' into the email field", not "test the form". Assume the tester has never seen this app.
-- Do not emit steps that merely open the route or wait for the page to load — the runner already navigates to \`route\` and waits before your first step. Begin steps at the first real interaction or observation.
-- Never emit steps that resize the window or set the browser viewport/screen size — the runner already opens a desktop-width (1280px) viewport, so the desktop navigation is always visible. Write steps as if that has already happened.
+- Do not emit steps that merely open the route or wait for the page to load; the runner already navigates to \`route\` and waits before your first step. Begin steps at the first real interaction or observation.
+- Never emit steps that resize the window or set the browser viewport/screen size; the runner already opens a desktop-width (1280px) viewport, so the desktop navigation is always visible. Write steps as if that has already happened.
 - Prefer 1-5 high-confidence items over many speculative ones. A wrong FAIL is far worse than a missed test.
 - If the PR body/title are empty or uninformative, infer intent from the diff alone and set confidence to "low".
 - If the change has no user-visible browser-testable surface (pure refactor, CI config, docs, dependency bumps), return an empty items array and say why in the summary.`;
@@ -161,14 +187,14 @@ export function renderContext(ctx: PrContext): string {
 
 /**
  * Turns PR context into a structured test plan. Returns null when the model
- * fails to produce schema-valid output — callers treat that as "stay silent".
+ * fails to produce schema-valid output; callers treat that as "stay silent".
  */
 /**
  * Some hosts treat json_schema as a suggestion: the model emits the right JSON
  * but wrapped in a ```json fence, which the SDK's strict parser rejects. Unwrap
  * and validate it ourselves before discarding the attempt.
  */
-function salvagePlan(raw: string | undefined, schema: typeof TestPlanSchema | typeof LocalTestPlanSchema): TestPlan | null {
+function salvagePlan(raw: string | undefined, schema: typeof TestPlanSchema | typeof LocalTestPlanSchema | typeof ActionTestPlanSchema): TestPlan | null {
   if (!raw) return null;
   const unfenced = raw
     .trim()
@@ -195,14 +221,26 @@ For this local run, establish what each check needs before browser execution:
 - Return questions=[] when the available context suffices or the remaining checks are explicitly blocked.
 `;
 
+const ACTION_PLANNING_PROMPT = `
+For this unattended CI run, establish each check's prerequisites before browser execution:
+- Use the PR reproduction instructions, linked issue, common setup script, and run context as evidence. The supplied setup is trusted-base source that runs before each check. Read it as context; do not translate it into plan actions or repeat its preparation.
+- Never invent records, account roles, feature flags, or available data from source code alone.
+- Populate startingState with ordinary UI preparation actions and an observable readiness condition, or null if no special state is needed. Verify supplied state even if context says it exists.
+- Each startingState.condition contains extract and equals. Extract requests a concrete page fact (title, selected workspace, count, checkbox state); equals is the exact expected string, number, or boolean. Do not include the expected answer in the extraction instruction. Greenlight compares the extracted value in code. Avoid broad judgments such as "the app is ready".
+- Preparation ends BEFORE exercising the changed behavior. Keep that behavior and its assertions in steps and expected. Do not duplicate common setup.
+- There is no interactive conversation. If required data, access, or preparation instructions are missing, set blockedReason to exactly what is missing and how the developer can supply it. Keep the affected item in the plan; other checks can proceed. Do not ask questions or guess.
+- File uploads, backend seeding, external sign-in, and account configuration require preparation outside this runner. If they are needed but not established by context, mark the item blocked. Never request credentials.
+- Return blockedReason null for runnable items. Simple navigation and self-contained form inputs need no special prerequisites.
+`;
+
 const MAX_OUTPUT_TOKENS = 32000;
 
 export async function generateTestPlan(
   ctx: PrContext,
   runContext?: RunContext,
 ): Promise<TestPlan | null> {
-  const schema = runContext ? LocalTestPlanSchema : TestPlanSchema;
-  const system = SYSTEM_PROMPT + (runContext ? LOCAL_PLANNING_PROMPT : "") +
+  const schema = runContext?.mode === "action" ? ActionTestPlanSchema : runContext ? LocalTestPlanSchema : TestPlanSchema;
+  const system = SYSTEM_PROMPT + (runContext?.mode === "action" ? ACTION_PLANNING_PROMPT : runContext ? LOCAL_PLANNING_PROMPT : "") +
     `\n\nRespond with a single JSON object matching this JSON schema:\n${JSON.stringify(z.toJSONSchema(schema))}`;
   const prompt = renderContext(ctx) + (runContext
     ? "\n" + section("Common browser setup", runContext.setup ?? "No common setup configured.") +
@@ -231,7 +269,7 @@ export async function generateTestPlan(
     }
   }
 
-  // Resolve credentials before the SDK does — its error is provider-specific
+  // Resolve credentials before the SDK does; its error is provider-specific
   // ("See https://docs.fireworks.ai/...") and says nothing about where the key
   // was supposed to come from. A null here has already been explained.
   const spec = planModelSpec();

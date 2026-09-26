@@ -1,104 +1,97 @@
 #!/usr/bin/env node
-
-import { mkdir, open, readFile, stat } from "node:fs/promises";
-import os from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const setupPath = path.join(os.homedir(), ".greenlight", "setup.yaml");
-const displayPath = "~/.greenlight/setup.yaml";
+export const STARTER = `import type { Stagehand } from "@browserbasehq/stagehand";
+import type { Page } from "playwright-core";
+import type { z as Zod } from "zod";
 
-function fail(message) {
-  throw new Error(message);
+type SetupContext = {
+  stagehand: Stagehand;
+  page: Page;
+  z: typeof Zod;
+  previewUrl: string;
+  signal: AbortSignal;
+};
+
+export default async function setup({ stagehand, page, z, signal }: SetupContext) {
+  signal.throwIfAborted();
+  // Add the app's preparation and readiness assertions here.
+  // Example:
+  // const result = await stagehand.act('Click "Continue".', { page });
+  // if (!result.success) throw new Error(result.message);
+  // const { workspace } = await stagehand.extract(
+  //   "Extract the selected workspace name.",
+  //   z.object({ workspace: z.string().nullable() }),
+  //   { page },
+  // );
+  // if (workspace !== "Demo") throw new Error("Expected the Demo workspace.");
+  throw new Error("Finish .greenlight/setup.ts, then run greenlight setup-check <preview-url>.");
+}
+`;
+
+export function repositoryRoot(cwd = process.cwd()) {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch { throw new Error("Run greenlight init from the app's Git repository."); }
 }
 
-function exactKeys(value, keys, label) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) ||
-      Object.keys(value).sort().join(",") !== [...keys].sort().join(",")) {
-    fail(`${label}: expected fields ${keys.join(", ")}`);
+function validateSource(content) {
+  if (!content.trim() || Buffer.byteLength(content) > 16_000) {
+    throw new Error("Setup must contain 1 to 16000 UTF-8 bytes.");
+  }
+  if (!/\bexport\s+default\b/.test(content)) {
+    throw new Error("Setup must default-export an async function. Supply TypeScript, not a YAML recipe.");
   }
 }
 
-function text(value, label) {
-  if (typeof value !== "string" || !value.trim()) fail(`${label}: must be nonblank text`);
+export async function saveInitialSetup(content, repoDir = repositoryRoot()) {
+  validateSource(content);
+  const folder = path.join(repoDir, ".greenlight");
+  await mkdir(folder, { recursive: true });
+  const destination = path.join(folder, "setup.ts");
+  const file = await open(destination, "wx", 0o600);
+  try { await file.writeFile(content, "utf8"); } finally { await file.close(); }
+  return destination;
 }
 
-function timeout(value, label) {
-  if (!Number.isInteger(value) || value < 1 || value > 300_000) {
-    fail(`${label}: must be an integer from 1 to 300000`);
+export function parseInitOptions(args) {
+  if (args.length === 0) return {};
+  if (args.length === 1 && args[0] === "--prompt") return { prompt: true };
+  if (args.length === 2 && args[0] === "--setup-file" && args[1] && !args[1].startsWith("--")) {
+    return { setupFile: args[1] };
   }
+  throw new Error("Usage: greenlight init [--prompt | --setup-file <TypeScript file>].");
 }
 
-function validate(content) {
-  let recipe;
-  try { recipe = JSON.parse(content); }
-  catch { fail("Setup must be JSON, which is also valid YAML."); }
-  exactKeys(recipe, ["version", "steps", "ready"], "setup");
-  if (recipe.version !== 1) fail("version: must be 1");
-  if (!Array.isArray(recipe.steps) || recipe.steps.length > 12) {
-    fail("steps: must contain at most 12 steps");
-  }
-  const ids = new Set();
-  for (const [index, step] of recipe.steps.entries()) {
-    const label = `steps.${index}`;
-    exactKeys(step, ["id", "wait_for", "timeout_ms", "actions", "verify"], label);
-    text(step.id, `${label}.id`);
-    if (!/^[a-zA-Z0-9_-]+$/.test(step.id) || ids.has(step.id)) {
-      fail(`${label}.id: must be unique and use only letters, digits, underscores, or hyphens`);
-    }
-    ids.add(step.id);
-    text(step.wait_for, `${label}.wait_for`);
-    timeout(step.timeout_ms, `${label}.timeout_ms`);
-    if (!Array.isArray(step.actions) || step.actions.length < 1 || step.actions.length > 12) {
-      fail(`${label}.actions: must contain 1 to 12 actions`);
-    }
-    step.actions.forEach((action, actionIndex) => text(action, `${label}.actions.${actionIndex}`));
-    text(step.verify, `${label}.verify`);
-  }
-  exactKeys(recipe.ready, ["condition", "timeout_ms"], "ready");
-  text(recipe.ready.condition, "ready.condition");
-  timeout(recipe.ready.timeout_ms, "ready.timeout_ms");
-}
-
-async function main() {
+export async function runGreenlightInit(options = {}) {
+  const repoDir = options.repoDir ?? repositoryRoot();
   let existing;
-  try {
-    const details = await stat(setupPath);
-    if (!details.isFile() || details.size > 16_000) fail(`${displayPath} must be a file of at most 16000 bytes.`);
-    existing = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(setupPath));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
+  try { existing = await readFile(path.join(repoDir, ".greenlight/setup.ts"), "utf8"); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
   if (existing !== undefined) {
-    console.log(`## Your existing Greenlight setup\n\nSaved at ${displayPath}. Kept your edits unchanged.\n\n\`\`\`yaml\n${existing.trim()}\n\`\`\`\n\nEdit this file directly if you need to change the setup.`);
-    return;
+    return `Existing .greenlight/setup.ts. Kept your edits unchanged.\n\n\`\`\`ts\n${existing.trim()}\n\`\`\``;
   }
-  try {
-    await stat(path.join(os.homedir(), ".greenlight", "setup.md"));
-    fail("Legacy ~/.greenlight/setup.md found. Create ~/.greenlight/setup.yaml using the version 1 schema in docs/browser-setup.md. The original Markdown file has been preserved.");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  if (options.prompt) {
+    return "What should Greenlight do before testing your app, and what should it check to know setup succeeded?";
   }
-  if (process.argv.length === 2) {
-    console.log("Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
-    return;
-  }
-  if (process.argv.length !== 4 || process.argv[2] !== "--setup-file" ||
-      !process.argv[3] || process.argv[3].startsWith("--")) {
-    fail("Usage: greenlight init [--setup-file <JSON file>].");
-  }
-  const bytes = await readFile(process.argv[3]);
-  if (bytes.length > 16_000) fail("Setup is too long. No setup file was written.");
-  const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  validate(content);
-  await mkdir(path.dirname(setupPath), { recursive: true, mode: 0o700 });
-  const file = await open(setupPath, "wx", 0o600);
-  try { await file.writeFile(content, "utf8"); }
-  finally { await file.close(); }
-  console.log(`## Greenlight setup saved\n\nSaved your supplied steps at ${displayPath}. Future local checks load it automatically.\n\n\`\`\`json\n${content}\n\`\`\`\n\nEdit this file directly if needed, then run /greenlight <PR URL> <preview URL>.`);
+  const content = options.setupFile
+    ? new TextDecoder("utf-8", { fatal: true }).decode(await readFile(options.setupFile))
+    : STARTER;
+  await saveInitialSetup(content, repoDir);
+  return `${options.setupFile ? "Saved your supplied script" : "Created a starter"} at .greenlight/setup.ts.\n` +
+    "Review and finish the script, then run greenlight setup-check <preview-url>. " +
+    "The script has not been executed or browser-verified. Commit it after testing; PR runs use the version on the base branch.";
 }
 
-try { await main(); }
-catch (error) {
-  console.error(`Greenlight: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try { console.log(await runGreenlightInit(parseInitOptions(process.argv.slice(2)))); }
+  catch (error) {
+    console.error(`Greenlight: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }

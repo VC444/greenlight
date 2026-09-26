@@ -30,9 +30,22 @@ import {
   type SubscriptionJsonRequest,
 } from "./subscriptionCli.js";
 import type { TestPlan } from "./testplan.js";
-import {
-  compileSemanticCondition,
-} from "./semantic.js";
+import { cacheProgress } from "./stagehandCache.js";
+
+test("cache progress reports storage failures without raw cache data", () => {
+  const messages: string[] = [];
+  for (const message of [
+    "unable to initialize cache directory: private-location",
+    "failed to read act cache entry: private-location",
+    "failed to write act cache entry: private-location",
+  ]) {
+    cacheProgress({ category: "cache", message }, value => messages.push(value));
+  }
+  assert.equal(messages.length, 3);
+  assert.ok(messages.every(message => !message.includes("private-location")));
+  cacheProgress({ category: "other", message: "act cache hit" }, value => messages.push(value));
+  assert.equal(messages.length, 3);
+});
 import {
   ACTION_PROMPT,
   SkillError,
@@ -240,41 +253,27 @@ test("skill runner isolates npm cache, cleans up on failure, and honors cache ov
   }
 });
 
-test("skill init prompts and saves without npx for Codex and Claude Code", async () => {
+test("skill init saves a native repository script without npx", () => {
   const script = path.resolve("skills/greenlight/scripts/run-greenlight.sh");
-  for (const hostEnv of [{ CODEX_SESSION_ID: "test-session" }, { CLAUDECODE: "1" }]) {
-    const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-offline-init-"));
-    const run = (...args: string[]) => spawnSync("/bin/bash", [script, "init", ...args], {
-      encoding: "utf8",
-      env: {
-        HOME: homeDir,
-        PATH: "/usr/bin:/bin",
-        GREENLIGHT_NODE_PATH: process.execPath,
-        GREENLIGHT_NPX_PATH: "/missing/npx",
-        ...hostEnv,
-      },
-    });
-    try {
-      const prompt = run();
-      assert.equal(prompt.status, 0, prompt.stderr);
-      assert.equal(prompt.stdout.trim(), "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
-      const setupFile = path.join(homeDir, "input.json");
-      writeFileSync(setupFile, '{"version":2}');
-      const invalid = run("--setup-file", setupFile);
-      assert.equal(invalid.status, 1);
-      assert.equal(existsSync(path.join(homeDir, ".greenlight/setup.yaml")), false);
-      writeFileSync(setupFile, JSON.stringify({ version: 1, steps: [], ready: {
-        condition: "Console usable", timeout_ms: 10_000,
-      } }));
-      const saved = run("--setup-file", setupFile);
-      assert.equal(saved.status, 0, saved.stderr);
-      assert.match(saved.stdout, /Greenlight setup saved/);
-      assert.equal((await readSetup(homeDir))?.includes("Console usable"), true);
-      const repeat = run();
-      assert.equal(repeat.status, 0, repeat.stderr);
-      assert.match(repeat.stdout, /Kept your edits unchanged/);
-    } finally { rmSync(homeDir, { recursive: true, force: true }); }
-  }
+  const repoDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-offline-init-"));
+  spawnSync("git", ["init", "--quiet", repoDir]);
+  const run = (...args: string[]) => spawnSync("/bin/bash", [script, "init", ...args], {
+    cwd: repoDir, encoding: "utf8", env: { ...process.env,
+      GREENLIGHT_NODE_PATH: process.execPath, GREENLIGHT_NPX_PATH: "/missing/npx" },
+  });
+  try {
+    const prompt = run("--prompt");
+    assert.equal(prompt.status, 0, prompt.stderr);
+    assert.match(prompt.stdout, /What should Greenlight do/);
+    assert.equal(existsSync(path.join(repoDir, ".greenlight/setup.ts")), false);
+    const input = path.join(repoDir, "input.ts");
+    writeFileSync(input, "export default async function setup() {}\n");
+    const saved = run("--setup-file", input);
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.match(saved.stdout, /Saved your supplied script/);
+    assert.match(readFileSync(path.join(repoDir, ".greenlight/setup.ts"), "utf8"), /export default/);
+    assert.match(run().stdout, /Kept your edits unchanged/);
+  } finally { rmSync(repoDir, { recursive: true, force: true }); }
 });
 
 test("skill runner binds to its current subscription CLI", () => {
@@ -1252,22 +1251,43 @@ const structuredSetup = JSON.stringify({
   ready: { condition: "Console usable", timeout_ms: 1000 },
 });
 
-test("semantic compiler recognizes exact visibility conditions only", () => {
-  assert.deepEqual(
-    compileSemanticCondition('The link labeled "See Examples" is visible.'),
-    { target: { role: "link", name: "See Examples", exact: true }, visible: true },
-  );
-  assert.deepEqual(
-    compileSemanticCondition('The text "Ready" is absent.'),
-    { target: { role: "text", name: "Ready", exact: true }, visible: false },
-  );
-  assert.equal(compileSemanticCondition("The workspace is ready"), null);
+test("all setup wording reaches Stagehand extraction through item execution", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = {
+    on: () => {}, off: () => {}, goto: async () => {},
+    waitForLoadState: async () => {}, evaluate: async () => "ready",
+    getByRole: () => assert.fail("Setup must not use a grammar-based locator"),
+  };
+  for (const condition of [
+    'The link labeled "See Examples" is visible.',
+    'A link labeled "See Examples" is visible.',
+    "The examples section is visible and usable.",
+  ]) {
+    let inspections = 0;
+    const stagehand = {
+      act: async () => ({ success: true }),
+      extract: async (prompt: string, _schema: unknown, options: { page: unknown }) => {
+        assert.equal(options.page, page);
+        if (prompt.includes("Condition:")) {
+          inspections++;
+          assert.ok(prompt.includes(JSON.stringify(condition)));
+          return { status: "satisfied", reason: "Observed current page" };
+        }
+        return { verdict: "pass", reasoning: "Verified" };
+      },
+    };
+    const result = await runItem(stagehand as never, page as never,
+      "https://preview.example", plan.items[0]!, null, undefined,
+      JSON.stringify({ version: 1, steps: [], ready: { condition, timeout_ms: 1000 } }));
+    assert.equal(result.error, null);
+    assert.equal(inspections, 1);
+    assert.ok(result.diagnostics?.every(entry => entry.strategy === "stagehand_ai"));
+  }
 });
 
-test("unsupported setup language falls back to the existing Stagehand AI driver", async () => {
+test("setup conditions always use the Stagehand AI driver", async () => {
   const events: string[] = [];
   await applySetup(structuredSetup, {
-    inspectSemantic: async () => null,
     inspect: async (prompt) => {
       events.push(prompt.includes("Welcome visible") ? "ai wait" : prompt.includes("Welcome closed") ? "ai verify" : "ai ready");
       return { status: "satisfied", reason: "Observed by Stagehand" };
@@ -1286,7 +1306,6 @@ test("unsupported setup language falls back to the existing Stagehand AI driver"
 test("setup waits for a delayed modal and resolves steps before checking readiness", async () => {
   const events: string[] = [];
   let welcomeInspections = 0;
-  let time = 0;
   await applySetup(structuredSetup, {
     inspect: async (prompt) => {
       if (prompt.includes("Welcome visible")) {
@@ -1297,7 +1316,7 @@ test("setup waits for a delayed modal and resolves steps before checking readine
       return { status: "satisfied", reason: "Observed condition" };
     },
     act: async (action) => { events.push(action); },
-  }, undefined, { now: () => time, sleep: async (ms) => { time += ms; } });
+  }, undefined, { sleep: async () => {} });
   assert.deepEqual(events, ["wait", "wait", "Ensure acknowledgment is checked", "Click Continue", "verify", "ready"]);
 });
 
@@ -1312,33 +1331,37 @@ test("setup rejects skip conditions before inspecting or acting", async () => {
   }
 });
 
-test("unresolved setup blocks the check on timeout, uncertainty, and failed verification", async () => {
-  for (const phase of ["wait", "verify", "ready", "unknown", "action"]) {
-    let time = 0;
-    let checkStarted = false;
-    const actions: string[] = [];
-    await assert.rejects((async () => {
-      await applySetup(structuredSetup, {
-        inspect: async (prompt) => {
-          if (phase === "unknown") return { status: "unknown", reason: "Cannot determine" };
-          const failed = (phase === "wait" && prompt.includes("Welcome visible")) ||
-            (phase === "verify" && prompt.includes("Welcome closed")) ||
-            (phase === "ready" && prompt.includes('"Console usable"'));
-          return { status: failed ? "unsatisfied" : "satisfied", reason: "Observed page" };
-        },
-        act: async (action) => { actions.push(action); if (phase === "action") throw new Error("Failed click"); },
-      }, undefined, { now: () => time, sleep: async (ms) => { time += ms; } });
-      checkStarted = true;
-    })(), /Setup blocked:/);
-    assert.equal(checkStarted, false);
-    assert.equal(actions.length, phase === "wait" || phase === "unknown" ? 0 : phase === "action" ? 1 : 2);
+test("setup keeps retrying unsatisfied and unknown conditions without a deadline", async () => {
+  for (const status of ["unsatisfied", "unknown"] as const) {
+    let inspections = 0;
+    let sleeps = 0;
+    await applySetup(JSON.stringify({ version: 1, steps: [], ready: {
+      condition: "Console usable", timeout_ms: 1,
+    } }), {
+      inspect: async () => ({ status: ++inspections > 10 ? "satisfied" : status, reason: "Observed page" }),
+      act: async () => assert.fail("No actions expected"),
+    }, undefined, { sleep: async () => { sleeps++; } });
+    assert.equal(inspections, 11);
+    assert.equal(sleeps, 10);
+  }
+});
+
+test("setup still blocks on observation and action errors", async () => {
+  for (const phase of ["inspection", "action"]) {
+    await assert.rejects(applySetup(structuredSetup, {
+      inspect: async () => {
+        if (phase === "inspection") throw new Error("Observation failed");
+        return { status: "satisfied", reason: "Visible" };
+      },
+      act: async () => { throw new Error("Action failed"); },
+    }), /Setup blocked:/);
   }
 });
 
 test("setup schema rejects ambiguity and reports field paths", () => {
   for (const [mutate, pattern] of [
     [(s: any) => { s.extra = true; }, /root/],
-    [(s: any) => { s.version = 2; }, /version/],
+    [(s: any) => { s.version = 999; }, /version/],
     [(s: any) => { s.steps.push(s.steps[0]); }, /steps.1.id/],
     [(s: any) => { s.steps[0].timeout_ms = -1; }, /steps.0.timeout_ms/],
     [(s: any) => { s.steps[0].timeout_ms = "1000"; }, /steps.0.timeout_ms/],
@@ -1394,74 +1417,75 @@ test("required steps execute in order even when the app already looks ready", as
     "Welcome closed", "Workspace picker visible", "Select saved workspace", "Workspace selected", "Console usable"]);
 });
 
-test("stalled observations respect the configured deadline", async () => {
-  const setup = JSON.stringify({ version: 1, steps: [], ready: { condition: "Console usable", timeout_ms: 10 } });
-  await assert.rejects(applySetup(setup, {
-    inspect: () => new Promise(() => {}),
-    act: async () => assert.fail("no actions"),
-  }), /Setup blocked: ready: observation timed out/);
+test("slow observations ignore legacy deadlines and new recipes need no timeout fields", async () => {
+  for (const ready of [
+    { condition: "Console usable", timeout_ms: 1 },
+    { condition: "Console usable" },
+  ]) {
+    await applySetup(JSON.stringify({ version: 1, steps: [], ready }), {
+      inspect: async () => {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return { status: "satisfied", reason: "Observed after old deadline" };
+      },
+      act: async () => assert.fail("No actions expected"),
+    });
+  }
 });
 
-test("init prompts without creating a file and saves supplied steps unchanged", async () => {
+test("init scaffolds native setup and preserves an existing script", async () => {
   const { runGreenlightInit, parseInitOptions } = await import("./init.js");
-  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-"));
+  const repoDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-"));
   try {
     assert.deepEqual(parseInitOptions([]), {});
-    assert.deepEqual(parseInitOptions(["--setup-file", "recipe.yaml"]), { setupFile: "recipe.yaml" });
+    assert.deepEqual(parseInitOptions(["--prompt"]), { prompt: true });
+    assert.deepEqual(parseInitOptions(["--setup-file", "setup.ts"]), { setupFile: "setup.ts" });
     for (const args of [["https://github.example.com/owner/repo"], ["--setup-file"], ["--force"]]) {
       assert.throws(() => parseInitOptions(args), /Usage/);
     }
-    const prompt = await runGreenlightInit({ homeDir });
-    assert.equal(prompt, "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
-    assert.equal(await readSetup(homeDir), null);
-    const setupFile = path.join(homeDir, "supplied.yaml");
-    writeFileSync(setupFile, structuredSetup);
-    const report = await runGreenlightInit({ homeDir, setupFile });
-    assert.match(report, /Saved your supplied steps/);
-    assert.equal(await readSetup(homeDir), structuredSetup);
-    writeFileSync(path.join(homeDir, ".greenlight/setup.yaml"), "# My personal edits\n" + structuredSetup);
-    const repeat = await runGreenlightInit({ homeDir, setupFile: "nonexistent.yaml" });
-    assert.match(repeat, /My personal edits/);
-    assert.equal(await readSetup(homeDir), "# My personal edits\n" + structuredSetup);
-  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+    assert.match(await runGreenlightInit({ repoDir, prompt: true }), /What should Greenlight do/);
+    assert.equal(existsSync(path.join(repoDir, ".greenlight/setup.ts")), false);
+    assert.match(await runGreenlightInit({ repoDir }), /Created a starter/);
+    const file = path.join(repoDir, ".greenlight/setup.ts");
+    assert.match(readFileSync(file, "utf8"), /export default async function setup/);
+    writeFileSync(file, "// Personal edits\nexport default async function setup() {}\n");
+    assert.match(await runGreenlightInit({ repoDir, setupFile: "missing.ts" }), /Personal edits/);
+  } finally { rmSync(repoDir, { recursive: true, force: true }); }
 });
 
-test("init rejects invalid input without writing and refuses to overwrite a racing writer", async () => {
+test("init saves supplied TypeScript without executing it and refuses overwrites", async () => {
   const { runGreenlightInit, saveInitialSetup } = await import("./init.js");
-  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-failure-"));
+  const repoDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-failure-"));
   try {
-    const setupFile = path.join(homeDir, "supplied.yaml");
-    for (const content of ["steps: []", "#".repeat(16001), Buffer.from([0xff])]) {
+    const setupFile = path.join(repoDir, "supplied.ts");
+    for (const content of ["version: 2", "#".repeat(16001), Buffer.from([0xff])]) {
       writeFileSync(setupFile, content);
-      await assert.rejects(runGreenlightInit({ homeDir, setupFile }));
-      assert.equal(await readSetup(homeDir), null);
+      await assert.rejects(runGreenlightInit({ repoDir, setupFile }));
+      assert.equal(existsSync(path.join(repoDir, ".greenlight/setup.ts")), false);
     }
-    await saveInitialSetup("# First writer\n" + structuredSetup, homeDir);
-    await assert.rejects(saveInitialSetup("# Second writer\n" + structuredSetup, homeDir), /EEXIST/);
-    assert.equal(await readSetup(homeDir), "# First writer\n" + structuredSetup);
-  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+    const source = 'throw new Error("Must not execute during init");\nexport default async function setup() {}';
+    await saveInitialSetup(source, repoDir);
+    await assert.rejects(saveInitialSetup(source, repoDir), /EEXIST/);
+    assert.equal(readFileSync(path.join(repoDir, ".greenlight/setup.ts"), "utf8"), source);
+  } finally { rmSync(repoDir, { recursive: true, force: true }); }
 });
 
-test("CLI init prompts, saves user input, and preserves existing setup", () => {
-  const homeDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
-  const run = (...args: string[]) => spawnSync(process.execPath, ["bin/greenlight.mjs", "init", ...args], {
-    cwd: process.cwd(), env: { ...process.env, HOME: homeDir, GREENLIGHT_LOCAL_AGENT: "claude" },
-    encoding: "utf8", timeout: 20_000,
+test("CLI init works without an agent and finds the repository root from a subdirectory", () => {
+  const cli = path.resolve("bin/greenlight.mjs");
+  const repoDir = mkdtempSync(path.join(os.tmpdir(), "greenlight-init-cli-"));
+  spawnSync("git", ["init", "--quiet", repoDir]);
+  const subdir = path.join(repoDir, "app");
+  mkdirSync(subdir);
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, "init", ...args], {
+    cwd: subdir, env: { ...process.env, GREENLIGHT_LOCAL_AGENT: "" }, encoding: "utf8", timeout: 20_000,
   });
   try {
-    const prompt = run();
-    assert.equal(prompt.status, 0, prompt.stderr);
-    assert.equal(prompt.stdout.trim(), "Greenlight initialization. What should I do before I start testing your app? For example, log in or dismiss a welcome popup.");
-    const setupFile = path.join(homeDir, "supplied.yaml");
-    writeFileSync(setupFile, "# My saved setup\n" + structuredSetup);
-    const saved = run("--setup-file", setupFile);
-    assert.equal(saved.status, 0, saved.stderr);
-    assert.match(saved.stdout, /Saved your supplied steps/);
-    const repeat = run();
-    assert.equal(repeat.status, 0, repeat.stderr);
-    assert.match(repeat.stdout, /My saved setup/);
-    assert.match(repeat.stdout, /Kept your edits unchanged/);
-  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+    const created = run();
+    assert.equal(created.status, 0, created.stderr);
+    assert.match(created.stdout, /Created a starter/);
+    assert.ok(existsSync(path.join(repoDir, ".greenlight/setup.ts")));
+    assert.equal(existsSync(path.join(subdir, ".greenlight/setup.ts")), false);
+    assert.match(run().stdout, /Kept your edits unchanged/);
+  } finally { rmSync(repoDir, { recursive: true, force: true }); }
 });
 
 const pmReview = {
@@ -1701,7 +1725,7 @@ test("local planner schema requires prerequisite decisions and targeted question
   const { LocalTestPlanSchema } = await import("./testplan.js");
   const local = {
     ...plan, pmReview: { concerns: [], limitation: null }, questions: [],
-    items: plan.items.map(item => ({ ...item, startingState: null, blockedReason: null })),
+    items: plan.items.map(item => ({ ...item, steps: [{ kind: "action", instruction: "Click Confirm order" }], startingState: null, blockedReason: null })),
   };
   assert.equal(LocalTestPlanSchema.safeParse(local).success, true);
   assert.equal(LocalTestPlanSchema.safeParse({ ...local, questions: undefined }).success, false);
@@ -1739,7 +1763,7 @@ process.stdin.on("end", () => {
   const local = Boolean(schema.properties.questions);
   const answered = input.includes("Use Sample import.");
   if (local && !input.includes("Select test workspace")) process.exit(8);
-  const output = ${JSON.stringify({ ...plan, pmReview: { concerns: [], limitation: null } })};
+  const output = ${JSON.stringify({ ...plan, items: plan.items.map(item => ({ ...item, steps: [{ kind: "action", instruction: "Click Confirm order" }] })), pmReview: { concerns: [], limitation: null } })};
   if (local) {
     output.questions = answered ? [] : ["Which failed import should I use?"];
     output.items = output.items.map(item => ({
@@ -1798,4 +1822,190 @@ test("item actions preserve checkbox and ambiguous-control instructions for Stag
   assert.equal(evidence.error, null);
   assert.deepEqual(received, steps);
   assert.deepEqual(evidence.diagnostics?.map(entry => entry.strategy), steps.map(() => "stagehand_ai"));
+});
+
+test("failed actions retain the instruction, step number, and driver reason", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = {
+    on: () => {}, off: () => {}, goto: async () => {},
+    waitForLoadState: async () => {}, evaluate: async () => "ready",
+  };
+  let calls = 0;
+  const stagehand = {
+    act: async () => ++calls === 1
+      ? { success: true, message: "Applied" }
+      : { success: false, message: "No actionable element found" },
+    extract: async () => { throw new Error("Must not judge an incomplete journey"); },
+  };
+  const evidence = await runItem(stagehand as never, page as never,
+    "https://preview.example", { ...plan.items[0]!, steps: ["Apply code", "Check prices", "Enter invalid code"] }, null);
+  assert.equal(calls, 2);
+  assert.equal(evidence.verdict, "uncertain");
+  assert.match(evidence.diagnostics?.at(-1)?.reason ?? "", /No actionable element found/);
+  assert.equal(evidence.diagnostics?.at(-1)?.instruction, "Check prices");
+  assert.equal((evidence.diagnostics?.at(-1) as { step?: number }).step, 2);
+});
+
+test("thrown action failures retain their stack and stop subsequent steps", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = { on: () => {}, off: () => {}, goto: async () => {}, waitForLoadState: async () => {}, evaluate: async () => "ready" };
+  const failure = new Error("Target detached while clicking Apply");
+  const evidence = await runItem({ act: async () => { throw failure; } } as never,
+    page as never, "https://preview.example", { ...plan.items[0]!, steps: ["Click Apply"] }, null);
+  assert.equal(evidence.diagnostics?.[0]?.reason, failure.message);
+  assert.match(evidence.diagnostics?.[0]?.errorStack ?? "", /Target detached/);
+  assert.equal(evidence.diagnostics?.[0]?.scope, "check");
+});
+
+test("local diagnostic artifact retains plan and evidence while redacting credentials", async () => {
+  const { writeDiagnostics } = await import("./browserDiagnostics.js");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "greenlight-diagnostics-"));
+  try {
+    const file = await writeDiagnostics(directory, {
+      version: 1, plan: { steps: ["Apply PIXAR20"] },
+      items: [{ error: "Failed at https://preview.example/?token=hidden-value with Bearer hidden-token" }],
+    });
+    const contents = readFileSync(file, "utf8");
+    assert.ok(!contents.includes("hidden-value"));
+    assert.ok(!contents.includes("hidden-token"));
+    assert.deepEqual(JSON.parse(contents).plan.steps, ["Apply PIXAR20"]);
+    assert.equal(JSON.parse(contents).version, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("diagnostic file links appear only in local reports", async () => {
+  const { renderResultsComment } = await import("./results.js");
+  const result = { replayUrl: undefined, diagnosticsPath: "/tmp/replay/diagnostics.json", items: [] };
+  assert.match(renderResultsComment(plan, result, "abc1234", null, "local"), /diagnostics\.json/);
+  assert.doesNotMatch(renderResultsComment(plan, result, "abc1234", null, "github"), /diagnostics\.json/);
+});
+
+test("Stagehand trace preserves API methods and exact returned actions, including unsuccessful results", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = { on: () => {}, off: () => {}, goto: async () => {}, waitForLoadState: async () => {}, evaluate: async () => "ready" };
+  const response = {
+    success: false, message: "Could not complete all actions", actionDescription: "Apply promo",
+    actions: [{ selector: "xpath=/html/body/input", method: "fill", arguments: ["PIXAR20"], description: "Enter code" }],
+    cacheStatus: "MISS",
+  };
+  const evidence = await runItem({ act: async () => response } as never,
+    page as never, "https://preview.example", { ...plan.items[0]!, steps: ["Apply promo"] }, null);
+  assert.equal(evidence.stagehandCalls?.length, 1);
+  assert.equal(evidence.stagehandCalls?.[0]?.method, "act");
+  assert.equal(evidence.stagehandCalls?.[0]?.status, "returned");
+  assert.deepEqual(evidence.stagehandCalls?.[0]?.result, response);
+});
+
+test("Stagehand trace includes condition extraction and final judgment in order", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = { on: () => {}, off: () => {}, goto: async () => {}, waitForLoadState: async () => {}, evaluate: async () => "ready" };
+  let extracts = 0;
+  const stagehand = {
+    act: async () => ({ success: true, actions: [], message: "Done" }),
+    extract: async () => ++extracts === 1
+      ? { status: "satisfied", reason: "Ready" }
+      : { verdict: "pass", reasoning: "Discount visible" },
+  };
+  const evidence = await runItem(stagehand as never, page as never, "https://preview.example",
+    { ...plan.items[0]!, startingState: { steps: [], condition: "Pricing visible" }, steps: ["Apply promo"] }, null);
+  assert.deepEqual(evidence.stagehandCalls?.map(call => [call.method, call.schema]),
+    [["extract", "SetupDecisionSchema"], ["act", undefined], ["extract", "JudgeSchema"]]);
+  assert.deepEqual(evidence.stagehandCalls?.at(-1)?.result, { verdict: "pass", reasoning: "Discount visible" });
+});
+
+test("Stagehand trace preserves thrown errors without retrying", async () => {
+  const { traceStagehandCall } = await import("./browserDiagnostics.js");
+  const calls: import("./browserDiagnostics.js").StagehandCall[] = [];
+  const error = new Error("Target detached");
+  await assert.rejects(traceStagehandCall(calls, { method: "act", instruction: "Click Apply" }, async () => { throw error; }), value => value === error);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.status, "threw");
+  assert.equal(calls[0]?.error?.message, error.message);
+});
+
+test("promo journey checks the discount before replacing the code", async () => {
+  const { runItem } = await import("./execute.js");
+  const page = {
+    on: () => {}, off: () => {}, goto: async () => {},
+    waitForLoadState: async () => {}, evaluate: async () => "ready",
+  };
+  const events: string[] = [];
+  const stagehand = {
+    act: async (instruction: unknown) => {
+      if (typeof instruction !== "string" || instruction.startsWith("Observe")) {
+        return { success: false, message: "Failed to perform act: No action found" };
+      }
+      events.push(instruction);
+      return { success: true };
+    },
+    extract: async (instruction: string) => {
+      events.push(instruction.includes("Condition:") ? "discount verified" : "final verified");
+      return instruction.includes("Condition:")
+        ? { status: "satisfied", reason: "20% off applied; prices $3.99 and $7.99" }
+        : { verdict: "pass", reasoning: "Invalid promo code; prices $4.99 and $9.99" };
+    },
+  };
+  const steps: TestPlan["items"][number]["steps"] = [
+    { kind: "action", instruction: "Fill Promo code with PIXAR20" },
+    { kind: "action", instruction: "Click Apply" },
+    { kind: "assert", instruction: "20% off applied is visible; Basic is $3.99 and Premium is $7.99" },
+    { kind: "action", instruction: "Replace Promo code with INVALID" },
+    { kind: "action", instruction: "Click Apply" },
+  ];
+  const evidence = await runItem(stagehand as never, page as never,
+    "https://preview.example", { ...plan.items[0]!, steps,
+      expected: "Invalid promo code appears; Basic is $4.99 and Premium is $9.99" }, null);
+  assert.equal(evidence.error, null);
+  assert.equal(evidence.verdict, "pass");
+  assert.deepEqual(events, ["Fill Promo code with PIXAR20", "Click Apply", "discount verified",
+    "Replace Promo code with INVALID", "Click Apply", "final verified"]);
+});
+
+test("intermediate assertions stop on contradictions or missing evidence", async () => {
+  const { runItem } = await import("./execute.js");
+  for (const status of ["unsatisfied", "unknown"] as const) {
+    const page = {
+      on: () => {}, off: () => {}, goto: async () => {},
+      waitForLoadState: async () => {}, evaluate: async () => "ready",
+    };
+    let inspected = 0;
+    const evidence = await runItem({
+      act: async () => { throw new Error("Must not erase the intermediate state"); },
+      extract: async () => { inspected++; return { status, reason: "Discount is not established" }; },
+    } as never, page as never, "https://preview.example", {
+      ...plan.items[0]!, steps: [
+        { kind: "assert", instruction: "Discounted prices are visible" },
+        { kind: "action", instruction: "Replace code with INVALID" },
+      ],
+    }, null);
+    assert.equal(inspected, 1);
+    assert.equal(evidence.verdict, status === "unsatisfied" ? "fail" : "uncertain");
+    assert.equal(evidence.error, null);
+    assert.match(evidence.reasoning, /Step 1: Discount/);
+    assert.equal(evidence.diagnostics?.[0]?.scope, "check");
+    assert.equal(evidence.diagnostics?.[0]?.step, 1);
+    assert.equal(evidence.diagnostics?.[0]?.outcome, status);
+  }
+});
+
+test("editable plan comments retain explicit action and assertion steps", async () => {
+  const { parsePlanBody } = await import("./comment.js");
+  const parsed = parsePlanBody(`<!-- greenlight:plan sha:abc confidence:high -->
+### Greenlight
+Promo code journey
+
+- [x] **Verify discount** (\`/\`)
+  1. [action] Fill Promo code with PIXAR20
+  2. [action] Click Apply
+  3. [assert] Discounted prices are visible
+
+  **Expect:** Discounted prices are visible
+`);
+  assert.deepEqual(parsed?.plan.items[0]?.steps, [
+    { kind: "action", instruction: "Fill Promo code with PIXAR20" },
+    { kind: "action", instruction: "Click Apply" },
+    { kind: "assert", instruction: "Discounted prices are visible" },
+  ]);
 });
