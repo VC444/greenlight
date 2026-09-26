@@ -93,7 +93,7 @@ $greenlight setup-check https://preview.example
 /greenlight setup-check https://preview.example
 ```
 
-Replace the URL with your app's preview. The skill runs your local setup script
+Replace the URL with your app's local preview (eg. http://localhost:3000). The skill runs your local setup script
 using Playwright without model calls, reports failures, and saves a browser
 replay in `greenlight-replay`.
 
