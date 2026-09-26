@@ -95,7 +95,7 @@ $greenlight setup-check https://preview.example
 
 Replace the URL with your app's preview. The skill runs your local setup script
 using Playwright without model calls, reports failures, and saves a browser
-replay in `greenlight-replay`. No global CLI installation is needed.
+replay in `greenlight-replay`.
 
 Review the replay, then commit `.greenlight/setup.ts` to your PR. **PR runs use
 the setup script from the PR's exact head commit**, so setup additions and edits
