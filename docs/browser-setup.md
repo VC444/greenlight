@@ -1,8 +1,9 @@
 # Browser setup
 
 Greenlight uses `.greenlight/setup.ts`, a standalone TypeScript module owned
-by the app's repository. It exports an async function containing native
-Stagehand calls, direct Playwright operations, and assertions written in code.
+by the app's repository. It exports an async function containing Playwright operations and readiness
+checks written in code. Setup uses only Playwright. After it succeeds,
+Stagehand executes the PR checks on the same page and browser session.
 
 ## Create and verify
 
@@ -25,8 +26,8 @@ greenlight setup-check https://preview.example
 ```
 
 This command executes local repository code against the supplied preview. It
-requires Chrome plus `GREENLIGHT_MODEL` and `GREENLIGHT_LLM_API_KEY` for
-Stagehand inference. Environment configuration can be supplied through `.env`.
+requires Chrome. It launches Playwright directly, without Stagehand, model
+credentials, or a model subscription. Environment configuration can be supplied through `.env`.
 It runs only setup, without generating a plan, making a model verdict, or
 posting to GitHub. Errors exit unsuccessfully; success means the script returned
 without throwing. The assertions in your script determine what readiness means.
@@ -35,71 +36,68 @@ A replay is written to `greenlight-replay` by default. Review it before committi
 ## Hook contract
 
 ```ts
-import type { Stagehand } from "@browserbasehq/stagehand";
 import type { Page } from "playwright-core";
-import type { z as Zod } from "zod";
 
 type SetupContext = {
-  stagehand: Stagehand;
   page: Page;
-  z: typeof Zod;
   previewUrl: string;
   signal: AbortSignal;
 };
 
-export default async function setup({ stagehand, page, z, signal }: SetupContext) {
+export default async function setup({ page, signal }: SetupContext) {
   signal.throwIfAborted();
-  const { workspace } = await stagehand.extract(
-    "Extract the selected workspace name.",
-    z.object({ workspace: z.string().nullable() }),
-    { page },
-  );
+  const selector = page.getByRole("button", { name: /^Workspace:/ });
+  await selector.waitFor({ state: "visible", timeout: 10_000 });
 
-  if (workspace !== "Demo") {
-    const opened = await stagehand.act("Click the workspace selector.", { page });
-    if (!opened.success) throw new Error(opened.message);
+  if ((await selector.innerText()) !== "Workspace: Demo") {
+    await selector.click({ timeout: 10_000 });
     signal.throwIfAborted();
-    const selected = await stagehand.act('Click "Demo".', { page });
-    if (!selected.success) throw new Error(selected.message);
+    await page.getByRole("menuitem", { name: "Demo", exact: true })
+      .click({ timeout: 10_000 });
   }
 
   signal.throwIfAborted();
-  const ready = await stagehand.extract(
-    "Extract the selected workspace name.",
-    z.object({ workspace: z.string().nullable() }),
-    { page },
-  );
-  if (ready.workspace !== "Demo") throw new Error("Expected the Demo workspace.");
+  await page.getByRole("button", { name: "Workspace: Demo", exact: true })
+    .waitFor({ state: "visible", timeout: 10_000 });
 }
+
 ```
 
-Use instructions and expected values that match your app. Greenlight supplies
-the existing Stagehand instance, live Playwright page, Zod, preview URL, and
-abort signal. The page is already at the preview entry point with replay
-recording attached. Always pass `{ page }` to Stagehand calls so they operate
-on the recorded page. Do not start or close your own browser or Stagehand session.
+Use accessible names and expected values that match your app. This example
+assumes the selector is named `Workspace: <name>` and opens a menu. Greenlight supplies
+the live Playwright page, preview URL, and abort signal. The page is already at the preview entry point with replay
+recording attached. Use this supplied page so setup and PR checks share state.
+Do not start or close your own browser session. The setup hook receives no
+Stagehand instance and must not make model calls.
 
 The hook runs before each check in the shared session. Handle already-prepared
 state. After common setup, Greenlight navigates to that check's route and applies
 PR-specific preparation before exercising the changed behavior. All normal
 setup interactions on the supplied page appear in the replay.
 
-Use native `act()`, `extract()`, `observe()`, or direct Playwright methods.
-Check `act()` results for success. Throw when readiness is not established.
-If a page needs time to settle, write explicit waits or polling in the script;
-Greenlight adds no YAML translation, condition interpretation, or hidden retry
-loop around your code. Extract facts and compare expected values in code.
+Prefer Playwright locators such as `getByRole`, `getByLabel`, and `getByTestId`.
+Locator actions wait for actionability; use `waitFor` for readiness and explicit
+operation timeouts within the hook deadline. Avoid fixed sleeps. Locator names
+and test IDs need maintenance when the app changes.
+
+The runtime supplies `playwright-core`, not the `@playwright/test` runner or its
+`test` and `expect` APIs. Use locator waits and code assertions that throw on
+failure. Playwright setup operations appear in the replay, but are not recorded
+as individual Stagehand calls in diagnostics. Full PR runs use Stagehand for
+browser launch and subsequent PR checks; setup itself uses only Playwright.
+The standalone `setup-check` command launches Chrome through Playwright and
+requires no model configuration.
 
 ## Loading and trust
 
 For ordinary PR runs, Greenlight downloads `.greenlight/setup.ts` through the
-GitHub Contents API using the PR event's exact `base.sha`. It uses the base
-repository and never falls back to PR-head code or a workspace file. Logs show
-the base revision. The existing `contents: read` permission is sufficient;
+GitHub Contents API using the PR event's exact `head.sha`. It uses the base
+repository and never falls back to the base version or a workspace file. Logs show
+the PR head revision. The existing `contents: read` permission is sufficient;
 a caller checkout is not needed for setup.
 
-A missing base script skips common setup. An empty, oversized, unreadable, or
-invalid script does not run checks as if setup succeeded. Missing base revision
+A missing PR head script skips common setup. An empty, oversized, unreadable, or
+invalid script does not run checks as if setup succeeded. Missing or invalid head revision
 or API errors other than a missing file stop the pipeline. Scripts are limited
 to 16000 UTF-8 bytes and must default-export a function. Syntax and export errors
 are reported as Setup blocked when execution begins.
@@ -110,12 +108,12 @@ helpers and the app's `node_modules` are not loaded. Type imports in the example
 are erased at runtime; for editor typechecking, install the corresponding
 dependencies in the app's development environment.
 
-This is trusted executable code with access to the runner environment, not a
+This is executable PR code with access to the runner environment, not a
 sandbox. Keep secrets in environment variables, not in the script. Review setup
-changes like other executable CI configuration. PR edits to setup are not used
-until merged. Use the explicitly invoked local `setup-check` command to verify
-a proposed script before merging; ordinary PR runs have no override to execute
-PR-head setup.
+changes like other executable CI configuration. PR additions and edits to setup execute
+in that PR run. Only run Greenlight with runner credentials appropriate for the
+PR code you allow to execute. Use the local `setup-check` command to verify a
+proposed script before pushing.
 
 ## Failure and timeout behavior
 
@@ -135,7 +133,7 @@ limit, and do not start background work that outlives the hook.
 
 Shared preparation belongs in the committed script. Record names, reproduction
 instructions, and other per-PR details belong in the PR description or
-`run-context`. The planner reads the base script as context to avoid duplicating
+`run-context`. The planner reads the PR head script as context to avoid duplicating
 its preparation; it never rewrites or regenerates the script.
 
 Per-check preparation remains visible in the plan comment as Prepare, Ready,
@@ -148,7 +146,7 @@ Vercel deployment bypass does not sign into the application.
 ## Migration from YAML
 
 The Action no longer loads `.greenlight/setup.yaml`. Rewrite its actions as
-native calls and its conditions as extraction plus code assertions in
+Playwright calls and its conditions as locator waits and code assertions in
 `.greenlight/setup.ts`. Review and run `setup-check`, then merge the new script.
 YAML files are preserved; there is no automatic conversion or deletion.
 

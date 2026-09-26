@@ -1,6 +1,6 @@
 ---
 name: greenlight
-description: Create a repository Stagehand setup script, verify it against a preview with setup-check, or run preserved local PR checks.
+description: Create a repository Playwright setup script, verify it against a preview with setup-check, or run preserved local PR checks.
 ---
 
 # Greenlight
@@ -11,17 +11,17 @@ For `/greenlight init` or `$greenlight init`, work from the app's repository. In
 
 If an existing script is displayed, show it and stop unless the user requested edits. If the command fails, report the error. Otherwise ask its question and use any setup instructions already supplied. Ask only for missing action labels, required data, or observable readiness facts. Source code alone does not establish what preparation the user wants.
 
-Write a standalone TypeScript module that default-exports `async function setup({ stagehand, page, z, previewUrl, signal })`. It receives the existing Stagehand instance, the live Playwright page already at the preview entry point, Zod, the preview URL, and an abort signal. Use native `stagehand.act()` and `stagehand.extract()` calls or direct page methods. Check `act()` results for success; compare extracted facts with expected values in code and throw on failed readiness. Check the abort signal between operations. The hook runs before each check in a shared browser session, so handle already-prepared state. Keep credentials in environment variables. Use only supplied preparation and readiness requirements. Keep the script self-contained; runtime imports may use Node built-ins and the Action's dependencies, but repository-relative helpers are not fetched.
+Write a standalone TypeScript module that default-exports `async function setup({ page, previewUrl, signal })`. It receives the live Playwright page already at the preview entry point, the preview URL, and an abort signal. Setup must be deterministic Playwright code with no Stagehand or model calls. Stagehand executes PR checks after setup succeeds on the same page and browser session. Prefer direct Playwright page methods with role, label, or test-ID locators, explicit timeouts, and readiness waits that throw on failure. The runtime provides `playwright-core`, not `@playwright/test`. Check the abort signal between operations. The hook runs before each check in a shared browser session, so handle already-prepared state. Keep credentials in environment variables. Use only supplied preparation and readiness requirements. Keep the script self-contained; runtime imports may use Node built-ins and the Action's dependencies, but repository-relative helpers are not fetched.
 
 Write the completed script to a temporary UTF-8 `.ts` file and run the same absolute runner path with `init --setup-file <temporary file>`, still from the app's repository. Remove the temporary file afterward. The writer preserves existing scripts and never executes supplied code. Show the saved script and explain that it has not yet been browser-verified.
 
-If the user supplied a preview URL and requested testing, follow the Verify repository setup section below. Otherwise explain how to invoke `setup-check` next. After verification, tell the user to commit and review the script. Ordinary PR runs load it from the pinned base commit; setup changes in the PR are not executed by those runs.
+If the user supplied a preview URL and requested testing, follow the Verify repository setup section below. Otherwise explain how to invoke `setup-check` next. After verification, tell the user to commit and review the script. Ordinary PR runs load it from the pinned PR head commit, including setup additions and edits in that PR.
 
 ## Verify repository setup
 
-For `$greenlight setup-check <preview-url>` or `/greenlight setup-check <preview-url>`, work from the app's repository. Require the preview URL and an existing `.greenlight/setup.ts`. Invoke this skill's `scripts/run-greenlight.sh` by absolute path with `setup-check <preview-url>`, keeping the working directory in the app's repository. The runner obtains the runtime through npx and selects the current agent subscription. Use this entry point even when a global `greenlight` command is unavailable.
+For `$greenlight setup-check <preview-url>` or `/greenlight setup-check <preview-url>`, work from the app's repository. Require the preview URL and an existing `.greenlight/setup.ts`. Invoke this skill's `scripts/run-greenlight.sh` by absolute path with `setup-check <preview-url>`, keeping the working directory in the app's repository. The runner obtains the runtime through npx. Setup verification launches Chrome through Playwright and needs no model credentials or subscription. Use this entry point even when a global `greenlight` command is unavailable.
 
-This invocation authorizes executing the working-tree setup script against the supplied preview. It makes no GitHub requests. Relay progress until the command completes. Report a failed setup without claiming verification; ask for missing app details or authentication only when needed to proceed. On success, point to the replay in `greenlight-replay` for review. Keep the script unchanged unless the user requests a fix. Ordinary PR runs use the committed base version, so this command is how the developer tests proposed setup edits before merging.
+This invocation authorizes executing the working-tree setup script against the supplied preview. It makes no GitHub requests. Relay progress until the command completes. Report a failed setup without claiming verification; ask for missing app details or authentication only when needed to proceed. On success, point to the replay in `greenlight-replay` for review. Keep the script unchanged unless the user requests a fix. Ordinary PR runs use the pinned PR head version; this command tests working-tree edits before pushing.
 
 ## Preserved local checks
 

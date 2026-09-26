@@ -23,7 +23,7 @@ export async function checkSetup(args: string[]): Promise<void> {
       summary: "Verify the repository setup script", confidence: "high",
       items: [{ intent: "Native setup", route: "/", steps: [], expected: "Setup completes without throwing" }],
     }, console.log, setup, conditionTimeoutMs, true);
-    if (!result) throw new Error("Setup check could not start. Configure GREENLIGHT_MODEL, GREENLIGHT_LLM_API_KEY, and Chrome.");
+    if (!result) throw new Error("Setup check could not start. Check that Chrome is installed and can launch.");
     const item = result.items[0];
     if (item?.verdict !== "pass") throw new Error(item?.error || "Setup did not complete.");
     console.log("Setup check passed. Review the replay in greenlight-replay before committing .greenlight/setup.ts.");

@@ -178,9 +178,9 @@ export async function runPlan(
   conditionTimeoutMs?: number,
   setupOnly = false,
 ): Promise<ExecutionResult | null> {
-  const localBackend = subscriptionBackend();
-  const spec = localBackend ? null : executorModelSpec();
-  if ((!localBackend && !spec) || !config.localBrowser) {
+  const localBackend = setupOnly ? null : subscriptionBackend();
+  const spec = setupOnly || localBackend ? null : executorModelSpec();
+  if ((!setupOnly && !localBackend && !spec) || !config.localBrowser) {
     console.warn(
       "execution not configured (needs a subscription CLI or LLM API key plus " +
         "GREENLIGHT_LOCAL_BROWSER=1); skipping",
@@ -200,13 +200,13 @@ export async function runPlan(
 
   await acquireSlot();
   const reportCache = onProgress ?? ((message: string) => console.log(message));
-  reportCache(config.stagehandCacheDir
+  if (!setupOnly) reportCache(config.stagehandCacheDir
     ? "Native action cache enabled. Conditions and verdicts use fresh model inference."
     : "Native action cache disabled. Actions, conditions, and verdicts use the model.");
   // Reason on our own model (disableAPI), never through Stagehand's hosted
   // inference. The browser is always local: on the Action that means a Chrome
   // on the runner itself, which is what makes the free path free.
-  const stagehand = new Stagehand({
+  const stagehand = setupOnly ? null : new Stagehand({
     disableAPI: true,
     // Native cache events include level 2 storage errors. Only selected events
     // reach normal progress output through the external logger.
@@ -230,25 +230,28 @@ export async function runPlan(
   let browser: Browser | undefined;
   try {
     onProgress?.("Starting Chrome...");
-    await stagehand.init();
-    const modelLabel = localBackend
-      ? `${localBackend} subscription`
-      : describe(spec!);
-    const visualJudgeLabel =
-      visualJudge?.kind === "subscription"
-        ? `${visualJudge.backend} subscription`
-        : visualJudge
-          ? describe(visualJudge.spec)
-          : null;
-    const judgeNote = visualJudgeLabel
-      ? `, visual judge ${visualJudgeLabel}` +
-        (visualJudge!.trusted ? "" : " (unverified: cannot fail an item)")
-      : ", no visual judge";
-    console.log(`browser session (model ${modelLabel}${judgeNote})`);
+    if (stagehand) {
+      await stagehand.init();
+      const modelLabel = localBackend
+        ? `${localBackend} subscription`
+        : describe(spec!);
+      const visualJudgeLabel =
+        visualJudge?.kind === "subscription"
+          ? `${visualJudge.backend} subscription`
+          : visualJudge
+            ? describe(visualJudge.spec)
+            : null;
+      const judgeNote = visualJudgeLabel
+        ? `, visual judge ${visualJudgeLabel}` +
+          (visualJudge!.trusted ? "" : " (unverified: cannot fail an item)")
+        : ", no visual judge";
+      console.log(`browser session (model ${modelLabel}${judgeNote})`);
 
-    browser = await chromium.connectOverCDP(stagehand.connectURL());
-    const context = browser.contexts()[0];
-    if (!context) throw new Error("The browser has no default context.");
+      browser = await chromium.connectOverCDP(stagehand.connectURL());
+    } else {
+      browser = await chromium.launch({ channel: "chrome", headless: config.headlessBrowser });
+    }
+    const context = browser.contexts()[0] ?? await browser.newContext({ viewport: DESKTOP_VIEWPORT });
     const page = context.pages()[0] ?? await context.newPage();
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await page.addInitScript(DIALOG_SUPPRESS);
@@ -308,7 +311,7 @@ export async function runPlan(
     return null;
   } finally {
     await browser?.close().catch(() => {});
-    await stagehand.close().catch(() => {});
+    await stagehand?.close().catch(() => {});
     releaseSlot();
   }
 }
@@ -475,7 +478,7 @@ async function judgeFromScreenshot(
 }
 
 export async function runItem(
-  stagehand: Stagehand,
+  stagehand: Stagehand | null,
   page: Page,
   previewUrl: string,
   item: TestPlan["items"][number],
@@ -542,14 +545,13 @@ export async function runItem(
     await navigate(initialTarget);
     let t = Date.now();
 
-    const driver = setupDriver(stagehand, page, recordDiagnostic, stagehandCalls);
-
     if (setup) {
       if (typeof setup === "string") {
-        await applySetup(setup, driver, onProgress, undefined, conditionTimeoutMs);
+        if (!stagehand) throw new Error("Legacy YAML setup requires Stagehand.");
+        await applySetup(setup, setupDriver(stagehand, page, recordDiagnostic, stagehandCalls), onProgress, undefined, conditionTimeoutMs);
       } else {
         onProgress?.("Running .greenlight/setup.ts...");
-        await setup.run({ stagehand, page, previewUrl }, conditionTimeoutMs ?? 60_000);
+        await setup.run({ page, previewUrl }, conditionTimeoutMs ?? 60_000);
         onProgress?.("Native setup completed.");
       }
       if (!setupOnly && target !== initialTarget) await navigate(target);
@@ -560,6 +562,8 @@ export async function runItem(
       consoleErrors, error: null, diagnostics, stagehandCalls,
     };
 
+    if (!stagehand) throw new Error("PR checks require Stagehand.");
+    const driver = setupDriver(stagehand, page, recordDiagnostic, stagehandCalls);
     scope = "starting_state";
     if (item.startingState) {
       await applyStartingState(item.startingState, driver, onProgress, conditionTimeoutMs);

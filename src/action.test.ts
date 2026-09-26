@@ -31,15 +31,18 @@ const contentClient = (content: string | Buffer, requests: unknown[] = []) => ({
   },
 }) as unknown as Octokit;
 
-test("Action loads only the pinned base revision and validates setup input", async () => {
+test("Action loads only the pinned PR head revision and validates setup input", async () => {
   const requests: any[] = [];
   const context = await readActionContext(contentClient(nativeSource, requests), baseJob, { GREENLIGHT_RUN_CONTEXT: "Use Sample import." });
   assert.equal(context.setup, nativeSource);
   assert.equal(context.notes, "Use Sample import.");
   assert.equal(context.conditionTimeoutMs, 60_000);
-  assert.equal(requests[0].parameters.ref, baseJob.baseSha);
+  assert.equal(requests[0].parameters.ref, baseJob.headSha);
   assert.equal(requests[0].parameters.path, ".greenlight/setup.ts");
-  await assert.rejects(readActionContext(contentClient(nativeSource), { ...baseJob, baseSha: undefined }), /pinned PR base SHA/);
+  for (const headSha of ["", "main", "abc"]) {
+    await assert.rejects(readActionContext(contentClient(nativeSource), { ...baseJob, headSha }), /pinned PR head SHA/);
+  }
+  assert.equal((await readActionContext(contentClient(nativeSource), { ...baseJob, baseSha: undefined }, {})).setup, nativeSource);
   for (const content of ["", "x".repeat(16_001), Buffer.from([0xff])]) {
     await assert.rejects(readActionContext(contentClient(content), baseJob, {}));
   }
@@ -49,7 +52,22 @@ test("Action loads only the pinned base revision and validates setup input", asy
   assert.throws(() => readActionOptions({ GREENLIGHT_RUN_CONTEXT: "x".repeat(16_001) }), /run-context/);
 });
 
-test("missing base setup skips the hook, while API failures stop the run", async () => {
+test("setup added or changed in the PR is loaded without consulting the base", async () => {
+  for (const baseSource of [null, "export default async function setup() { throw new Error('Old setup'); }"]) {
+    const refs: string[] = [];
+    const client = { request: async (_route: string, parameters: { ref: string }) => {
+      refs.push(parameters.ref);
+      const source = parameters.ref === baseJob.headSha ? nativeSource : baseSource;
+      if (source === null) throw { status: 404 };
+      return { data: { type: "file", size: Buffer.byteLength(source), encoding: "base64",
+        content: Buffer.from(source).toString("base64") } };
+    } } as unknown as Octokit;
+    assert.equal((await readActionContext(client, baseJob, {})).setup, nativeSource);
+    assert.deepEqual(refs, [baseJob.headSha]);
+  }
+});
+
+test("missing PR head setup skips the hook, while API failures stop the run", async () => {
   for (const status of [404, 403, 500]) {
     const client = { request: async () => { throw { status }; } } as unknown as Octokit;
     if (status === 404) assert.equal((await readActionContext(client, baseJob, {})).setup, null);

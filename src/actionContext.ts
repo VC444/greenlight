@@ -16,13 +16,13 @@ export async function readActionContext(
   octokit: Octokit, job: PullRequestJob, env: NodeJS.ProcessEnv = process.env,
 ): Promise<RunContext & { conditionTimeoutMs: number }> {
   const options = readActionOptions(env);
-  if (!job.baseSha || !/^[a-f0-9]{40}$/i.test(job.baseSha)) {
-    throw new Error("A pinned PR base SHA is required to load trusted .greenlight/setup.ts.");
+  if (!job.headSha || !/^[a-f0-9]{40}$/i.test(job.headSha)) {
+    throw new Error("A pinned PR head SHA is required to load .greenlight/setup.ts.");
   }
   let setup: string | null = null;
   try {
     const { data } = await octokit.request("GET /repos/{owner}/{repo}/contents/{path}", {
-      owner: job.owner, repo: job.repo, path: ".greenlight/setup.ts", ref: job.baseSha,
+      owner: job.owner, repo: job.repo, path: ".greenlight/setup.ts", ref: job.headSha,
     });
     if (Array.isArray(data) || data.type !== "file" || !("content" in data) ||
         data.encoding !== "base64" || data.size > 16_000) {
@@ -35,7 +35,7 @@ export async function readActionContext(
   } catch (error) {
     if ((error as { status?: number }).status !== 404) throw error;
   }
-  console.log(setup ? `Loaded .greenlight/setup.ts from base revision ${job.baseSha.slice(0, 7)}.`
-    : "No .greenlight/setup.ts at the base revision; common setup skipped.");
+  console.log(setup ? `Loaded .greenlight/setup.ts from PR head revision ${job.headSha.slice(0, 7)}.`
+    : "No .greenlight/setup.ts at the PR head revision; common setup skipped.");
   return { mode: "action", setup, ...options };
 }

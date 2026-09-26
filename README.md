@@ -76,7 +76,7 @@ $greenlight init
 ```
 
 Describe the preparation and how to recognize success. The agent asks for
-missing details and writes native Stagehand code to `.greenlight/setup.ts` at
+missing details and writes deterministic Playwright code to `.greenlight/setup.ts` at
 the repository root, preserving any existing script. Review it before testing.
 Greenlight runs this script before each check. If your app needs no preparation,
 you can skip it.
@@ -94,12 +94,12 @@ $greenlight setup-check https://preview.example
 ```
 
 Replace the URL with your app's preview. The skill runs your local setup script
-using your current agent subscription, reports failures, and saves a browser
+using Playwright without model calls, reports failures, and saves a browser
 replay in `greenlight-replay`. No global CLI installation is needed.
 
-Review the replay, then commit and merge `.greenlight/setup.ts`. **PR runs use
-the setup script from the PR's base commit**, so test setup changes locally
-before merging them.
+Review the replay, then commit `.greenlight/setup.ts` to your PR. **PR runs use
+the setup script from the PR's exact head commit**, so setup additions and edits
+are exercised before merging.
 
 See [Browser setup](docs/browser-setup.md) for script examples and
 [action.yml](action.yml) for optional Action inputs.

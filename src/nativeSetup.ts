@@ -1,16 +1,12 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import type { Stagehand } from "@browserbasehq/stagehand";
 import type { Page } from "playwright-core";
-import { z } from "zod";
 import { tsImport } from "tsx/esm/api";
 import { SetupBlockedError } from "./setup.js";
 
 export interface NativeSetupContext {
-  stagehand: Stagehand;
   page: Page;
-  z: typeof z;
   previewUrl: string;
   signal: AbortSignal;
 }
@@ -18,7 +14,7 @@ export type NativeSetupFunction = (context: NativeSetupContext) => Promise<void>
 export interface NativeSetup {
   kind: "native";
   timedOut: boolean;
-  run(context: Omit<NativeSetupContext, "z" | "signal">, timeoutMs: number): Promise<void>;
+  run(context: Omit<NativeSetupContext, "signal">, timeoutMs: number): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -51,7 +47,7 @@ export function createNativeSetup(source: string): NativeSetup {
           (async () => {
             const hook = await (loading ??= load());
             controller.signal.throwIfAborted();
-            await hook({ ...context, z, signal: controller.signal });
+            await hook({ page: context.page, previewUrl: context.previewUrl, signal: controller.signal });
           })(),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => {

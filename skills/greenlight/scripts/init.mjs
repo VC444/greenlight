@@ -4,30 +4,23 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const STARTER = `import type { Stagehand } from "@browserbasehq/stagehand";
-import type { Page } from "playwright-core";
-import type { z as Zod } from "zod";
+export const STARTER = `import type { Page } from "playwright-core";
 
 type SetupContext = {
-  stagehand: Stagehand;
   page: Page;
-  z: typeof Zod;
   previewUrl: string;
   signal: AbortSignal;
 };
 
-export default async function setup({ stagehand, page, z, signal }: SetupContext) {
+export default async function setup({ page, signal }: SetupContext) {
   signal.throwIfAborted();
   // Add the app's preparation and readiness assertions here.
   // Example:
-  // const result = await stagehand.act('Click "Continue".', { page });
-  // if (!result.success) throw new Error(result.message);
-  // const { workspace } = await stagehand.extract(
-  //   "Extract the selected workspace name.",
-  //   z.object({ workspace: z.string().nullable() }),
-  //   { page },
-  // );
-  // if (workspace !== "Demo") throw new Error("Expected the Demo workspace.");
+  // await page.getByRole("button", { name: "Continue", exact: true })
+  //   .click({ timeout: 10_000 });
+  // signal.throwIfAborted();
+  // await page.getByRole("heading", { name: "Dashboard", exact: true })
+  //   .waitFor({ state: "visible", timeout: 10_000 });
   throw new Error("Finish .greenlight/setup.ts, then run greenlight setup-check <preview-url>.");
 }
 `;
@@ -85,7 +78,7 @@ export async function runGreenlightInit(options = {}) {
   await saveInitialSetup(content, repoDir);
   return `${options.setupFile ? "Saved your supplied script" : "Created a starter"} at .greenlight/setup.ts.\n` +
     "Review and finish the script, then run greenlight setup-check <preview-url>. " +
-    "The script has not been executed or browser-verified. Commit it after testing; PR runs use the version on the base branch.";
+    "The script has not been executed or browser-verified. Commit it after testing; PR runs use the version at the exact PR head commit.";
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
