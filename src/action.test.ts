@@ -77,6 +77,22 @@ test("editable comments retain preparation, blockers, and typed test steps", () 
   assert.match(broken.plan.items[0]?.blockedReason ?? "", /valid Ready and Equals/);
 });
 
+test("plan steps read as a plain numbered checklist and retain execution types after edits", () => {
+  const steps: TestPlan["items"][number]["steps"] = [
+    { kind: "action", instruction: "Click Retry" },
+    { kind: "assert", instruction: "The import shows a success message." },
+    "Open the import details",
+  ];
+  const rendered = body({ ...plan, items: [{ ...plan.items[0]!, steps }] });
+  const visible = rendered.replace(/<!--.*?-->/g, "");
+  assert.doesNotMatch(visible, /\[(?:action|assert)\]/);
+  assert.match(visible, /1\.\s+Click Retry\s*\n  2\.\s+The import shows a success message\.\s*\n  3\. Open the import details/);
+  const edited = rendered.replace("The import shows a success message.", "The import shows Complete.");
+  assert.deepEqual(parsePlanBody(edited)?.plan.items[0]?.steps, [
+    steps[0], { kind: "assert", instruction: "The import shows Complete." }, steps[2],
+  ]);
+});
+
 test("CI setup bounds repeated unknown observations and stops before actions", async () => {
   let now = 0;
   const setup = JSON.stringify({ version: 2, steps: [{ id: "enter", wait_for: condition, actions: ["Click Continue"], verify: condition }], ready: condition });

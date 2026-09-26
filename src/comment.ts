@@ -182,7 +182,7 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
       }
       const step = line.match(STEP_RE);
       if (step?.[1]) {
-        const typed = step[1].match(/^\[(action|assert)\] (.+)$/);
+        const typed = step[1].match(/^(?:<!-- greenlight:step )?\[(action|assert)\](?: -->)? (.+)$/);
         draft.steps.push(typed
           ? { kind: typed[1] as "action" | "assert", instruction: typed[2]! }
           : step[1]);
@@ -241,7 +241,8 @@ export function renderPlan(plan: TestPlan, headSha: string): string {
       if (typeof condition !== "string") lines.push(`  **Equals:** ${JSON.stringify(condition.equals)}`);
     }
     for (const [i, step] of item.steps.entries()) {
-      lines.push(`  ${i + 1}. ${typeof step === "string" ? step : `[${step.kind}] ${step.instruction}`}`);
+      // Keep execution types out of the visible checklist while retaining them after edits.
+      lines.push(`  ${i + 1}. ${typeof step === "string" ? step : `<!-- greenlight:step [${step.kind}] --> ${step.instruction}`}`);
     }
     lines.push("");
     lines.push(`  **Expect:** ${item.expected}`);
