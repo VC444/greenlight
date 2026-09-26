@@ -1504,8 +1504,7 @@ test("local reports include grounded PM concerns without changing browser verdic
     ["https://github.example.com/owner/repo/pull/1", "https://preview.example"],
     dependencies([], { generatePlan: async () => reviewedPlan }),
   );
-  assert.match(report, /#### PM perspective/);
-  assert.match(report, /Based on PR context; not browser-verified/);
+  assert.match(report, /#### Some thoughts\.\.\./);
   for (const text of Object.values(pmReview.concerns[0]!)) assert.ok(report.includes(text));
   assert.ok(report.includes(pmReview.limitation));
   assert.match(report, /1 passed/);

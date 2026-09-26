@@ -148,7 +148,7 @@ export function parsePlanBody(body: string): Omit<ParsedPlanComment, "id"> | nul
     }
     if (!inPlan) continue;
     // The rule below the items separates the plan from the gate and footer.
-    if (line.startsWith("---") || line === "#### PM perspective") break;
+    if (line.startsWith("---") || line === "#### Some thoughts..." || line === "#### PM perspective") break;
     if (line.includes(RUN_TOKEN)) continue;
 
     const item = line.match(ITEM_RE);

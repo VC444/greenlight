@@ -60,11 +60,6 @@ function renderItems(items: ItemEvidence[]): string {
       ];
       const detail = item.error ?? item.reasoning;
       if (detail) lines.push(`  ${detail}`);
-      if (item.consoleErrors.length) {
-        lines.push(
-          `  <sub>${item.consoleErrors.length} console error(s) during this journey</sub>`,
-        );
-      }
       if (item.error && item.diagnostics?.length) {
         lines.push("  <details><summary>Execution diagnostics</summary>", "");
         for (const diagnostic of item.diagnostics.slice(-8)) {
@@ -205,7 +200,7 @@ export async function reportPaused(
 
 export function renderPmReview(plan: TestPlan): string {
   const review = plan.pmReview;
-  const lines = ["#### PM perspective", "", "Based on PR context; not browser-verified.", ""];
+  const lines = ["#### Some thoughts...", ""];
   if (!review) {
     lines.push("PM review unavailable for this plan.");
   } else {
@@ -245,9 +240,9 @@ export function renderResultsComment(
   const check = checkUrl ? ` · [details](${checkUrl})` : "";
   const safety =
     surface === "local"
-      ? "Greenlight reports locally; it does not change or gate the pull request"
-      : "❌ and ❔ never fail the check run: Greenlight reports, it doesn't gate the merge";
-  const footer = `Ran against the preview for PR commit \`${headSha.slice(0, 7)}\`${check} · ❔ means the run couldn't reach a verdict (it broke, or the outcome wasn't observable from the page) · ${safety}`;
+      ? " · Greenlight reports locally; it does not change or gate the pull request"
+      : "";
+  const footer = `Ran against the preview for PR commit \`${headSha.slice(0, 7)}\`${check}${safety}`;
   lines.push("", surface === "local" ? footer : `<sub>${footer}</sub>`);
   return lines.join("\n");
 }
