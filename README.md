@@ -7,6 +7,9 @@ posts the results on the PR. Each check is marked **Pass**, **Fail**, or
 
 Built for **Next.js apps deployed on Vercel**.
 
+[Watch the demo](https://youtu.be/Av5Zy-Phg-0?si=kWPwq_MZpvcBgMJZ) or
+[book a call](https://cal.com/vignesh-cal/greenlight-demo).
+
 ## Add the GitHub Action
 
 Add these repository secrets:
