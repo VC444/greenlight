@@ -1,11 +1,13 @@
 # Greenlight
 
-**Greenlight is a GitHub Action that tests your teammate's pull requests in a real browser.**
+Greenlight is a GitHub Action that tests your teammate's pull requests in a real browser.
 It reads the PR, creates a test plan, runs it against the Vercel preview, and
-posts the results on the PR. Each check is marked **Pass**, **Fail**, or
-**Inconclusive**, with a browser replay attached to the workflow run.
+posts the results on the PR. Each check is marked Pass, Fail, or
+Inconclusive, with a browser replay attached to the workflow run.
 
 Built for **Next.js apps deployed on Vercel**.
+
+<img width="944" height="898" alt="Screenshot 2026-09-27 at 8 01 45 PM" src="https://github.com/user-attachments/assets/9829f3fb-210f-484d-832c-8ada0578b295" />
 
 [Watch the demo](https://youtu.be/Av5Zy-Phg-0?si=kWPwq_MZpvcBgMJZ) or
 [book a call](https://cal.com/vignesh-cal/greenlight-demo).
