@@ -47,6 +47,7 @@ if [[ -n "${PATH:-}" ]]; then
   runtime_path="$runtime_path:$PATH"
 fi
 export PATH="$runtime_path"
+export GREENLIGHT_DEBUG=1
 
 if [[ "${1:-}" == "init" ]]; then
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"

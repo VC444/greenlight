@@ -295,6 +295,7 @@ test("skill runner binds to its current subscription CLI", () => {
     [
       "#!/usr/bin/env bash",
       '[[ "$GREENLIGHT_LOCAL_AGENT" == "$EXPECTED_AGENT" ]] || exit 10',
+      '[[ "$GREENLIGHT_DEBUG" == "1" ]] || exit 16',
       '[[ "$1" == "--yes" ]] || exit 11',
       '[[ "$2" == "--package" ]] || exit 12',
       '[[ "$3" == "github:VC444/greenlight#main" ]] || exit 13',
