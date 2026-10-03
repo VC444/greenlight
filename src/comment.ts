@@ -233,6 +233,7 @@ export function renderPlan(plan: TestPlan, headSha: string): string {
   lines.push("");
   for (const item of plan.items) {
     lines.push(`- [x] **${item.intent}** (\`${item.route}\`)`);
+    lines.push("", "  <details>", "  <summary>Check details</summary>", "");
     if (item.blockedReason) lines.push(`  **Blocked:** ${singleLine(item.blockedReason)}`);
     if (item.startingState) {
       for (const step of item.startingState.steps) lines.push(`  **Prepare:** ${singleLine(step)}`);
@@ -240,13 +241,14 @@ export function renderPlan(plan: TestPlan, headSha: string): string {
       lines.push(`  **Ready:** ${singleLine(typeof condition === "string" ? condition : condition.extract)}`);
       if (typeof condition !== "string") lines.push(`  **Equals:** ${JSON.stringify(condition.equals)}`);
     }
+    lines.push("");
     for (const [i, step] of item.steps.entries()) {
       // Keep execution types out of the visible checklist while retaining them after edits.
       lines.push(`  ${i + 1}. ${typeof step === "string" ? step : `<!-- greenlight:step [${step.kind}] --> ${step.instruction}`}`);
     }
     lines.push("");
     lines.push(`  **Expect:** ${item.expected}`);
-    lines.push("");
+    lines.push("", "  </details>", "");
   }
   lines.push(
     "---",
