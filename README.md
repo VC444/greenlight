@@ -74,10 +74,6 @@ Use Node.js 22.20 or newer. Open a Codex or Claude Code session in your app's
 repository, then invoke the skill:
 
 ```text
-# Codex
-$greenlight init
-
-# Claude Code
 /greenlight init
 ```
 
@@ -92,10 +88,6 @@ you can skip it.
 With Chrome available, invoke the skill in the same agent session:
 
 ```text
-# Codex
-$greenlight setup-check https://preview.example
-
-# Claude Code
 /greenlight setup-check https://preview.example
 ```
 
@@ -112,24 +104,12 @@ See [Browser setup](docs/browser-setup.md) for script examples and
 
 ## Choosing a model
 
-`model` is required and takes a `provider/model` string. One key drives both the
-test plan and the browser run, so the key you pass must belong to the provider
-you name.
-
-Pick any model from [OpenRouter's model catalog](https://openrouter.ai/models).
-
-Keep the full catalog ID, including its author prefix. Greenlight also supports
-`anthropic`, `openai`, `google`, `fireworks`, and `together` directly, using each
-provider's own model ID and API key.
-
-The prefix is required. An id without one is rejected:
-your key is only good for one provider, and Greenlight will not pick which host
-receives it.
+`model` is required and takes a `provider/model` string. Pick any model from [OpenRouter's model catalog](https://openrouter.ai/models).
 
 Examples, as the line reads in the workflow's `with:` block:
 
 - `model: openai/gpt-5.6-sol`
-- `model: anthropic/claude-opus-5`
+- `model: anthropic/claude-opus-5.5`
 - `model: fireworks/accounts/fireworks/models/kimi-k3`
 
 Those are ids that existed when this was written, not recommendations.
