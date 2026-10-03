@@ -5,7 +5,10 @@ It reads the PR, creates a test plan, runs it against the Vercel preview, and
 posts the results on the PR. Each check is marked Pass, Fail, or
 Inconclusive, with a browser replay attached to the workflow run.
 
-<img width="944" height="898" alt="Screenshot 2026-09-27 at 8 01 45 PM" src="https://github.com/user-attachments/assets/9829f3fb-210f-484d-832c-8ada0578b295" />
+<img width="1273" height="340" alt="Screenshot 2026-10-03 at 11 30 52 PM" src="https://github.com/user-attachments/assets/a9d93e88-65b1-416e-894e-fd81324db722" />
+
+<img width="942" height="882" alt="Screenshot 2026-10-03 at 11 30 15 PM" src="https://github.com/user-attachments/assets/08ccdabb-99e3-4a30-94a4-e8f5920c8e8a" />
+
 
 [Watch the demo](https://youtu.be/Av5Zy-Phg-0?si=kWPwq_MZpvcBgMJZ) or
 [book a call](https://cal.com/vignesh-cal/greenlight-demo).
