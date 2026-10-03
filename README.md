@@ -9,6 +9,9 @@ Inconclusive, with a browser replay attached to the workflow run.
 
 <img width="942" height="882" alt="Screenshot 2026-10-03 at 11 30 15 PM" src="https://github.com/user-attachments/assets/08ccdabb-99e3-4a30-94a4-e8f5920c8e8a" />
 
+<img width="956" height="1160" alt="Screenshot 2026-10-03 at 11 42 45 PM" src="https://github.com/user-attachments/assets/a875ced3-9d1a-4d06-aa18-0d661251e263" />
+
+
 
 [Watch the demo](https://youtu.be/Av5Zy-Phg-0?si=kWPwq_MZpvcBgMJZ) or
 [book a call](https://cal.com/vignesh-cal/greenlight-demo).
